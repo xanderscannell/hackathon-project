@@ -7,7 +7,8 @@ Fleet vehicles measure road roughness as they drive; the map shows it against th
 ```
 python pipeline.py            # data/raw/drives -> data/out/*.json
 python pipeline.py --selftest
-python -m http.server 8000    # then open http://localhost:8000
+python backend.py              # dashboard + read-only API, http://localhost:8000
+python backend.py --selftest
 
 # weekly brief (needs the Orchestrate ADK in .venv and an active env)
 .venv/Scripts/orchestrate tools import -k flow -f orchestrate/weekly_brief.py
@@ -25,3 +26,19 @@ python model.py                            # every model on the same held-out se
 ```
 
 `transformers` 5.x breaks TSPulse's output shapes, hence the pin.
+
+## Road Desk agent (watsonx Orchestrate)
+
+```
+.venv/Scripts/orchestrate connections add -a road_api
+.venv/Scripts/orchestrate connections configure -a road_api --env draft -k key_value -t team   # and --env live
+.venv/Scripts/orchestrate tools import -k python -f orchestrate/road_tools.py -a road_api
+.venv/Scripts/orchestrate agents import -f orchestrate/road_desk.yaml
+.venv/Scripts/orchestrate agents deploy -n road_desk
+.venv/Scripts/python orchestrate/webchat_config.py      # embeds the chat in the dashboard
+
+cloudflared tunnel --url http://localhost:8000          # public URL for the agent's tools
+.venv/Scripts/orchestrate connections set-credentials -a road_api --env draft -e "url=<tunnel url>"   # and --env live
+```
+
+The tunnel makes the backend public. Through it only `/api/` answers; the dashboard and `data/out/` (raw drive tracks) stay local.

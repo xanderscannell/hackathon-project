@@ -64,6 +64,7 @@
 <div id="acc" class="card"></div>
 <div id="rank" class="card"></div>
 <div id="brief" class="card"></div>
+<div id="chat"></div>
 <script>
 const map = L.map('map', { preferCanvas: true }).setView([42.2, -83.3], 11);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -111,6 +112,8 @@ async function init() {
     { position: 'topright', collapsed: false }).addTo(map);
 
   renderAccuracy(index.accuracy);
+  const chat = await fetch('data/out/webchat.json').then(r => r.ok ? r.json() : null).catch(() => null);
+  if (chat) loadChat(chat);
   const models = await fetch('data/out/models.json').then(r => r.ok ? r.json() : null).catch(() => null);
   if (models) renderModels(models);
   const brief = await fetch('data/out/brief.json').then(r => r.ok ? r.json() : null).catch(() => null);
@@ -193,6 +196,16 @@ function workOrder(id) {
     <p style="color:#666;font-size:12px">Generated from fleet sensor data as of ${fmtDate(PH.as_of)}. The detection date is a
     best case: the defect may have existed before the fleet first hit it. Triage estimate, not a legal determination.</p>`;
   window.open(URL.createObjectURL(new Blob([html], { type: 'text/html' })));
+}
+
+// Road Desk agent (watsonx Orchestrate web chat); ids from orchestrate/webchat_config.py
+function loadChat(c) {
+  window.wxOConfiguration = { orchestrationID: c.orchestrationID, hostURL: c.hostURL, rootElementID: 'chat',
+    showLauncher: true, chatOptions: { agentId: c.agentId, agentEnvironmentId: c.agentEnvironmentId } };
+  const s = document.createElement('script');
+  s.src = `${c.hostURL}/wxochat/wxoLoader.js?embed=true`;
+  s.onload = () => wxoLoader.init();
+  document.head.appendChild(s);
 }
 
 function renderModels(m) {
