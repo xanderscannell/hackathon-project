@@ -316,11 +316,67 @@ def build_potholes(drives, segs, pieces):
     return {"as_of": str(as_of), "clock_days": CLOCK_DAYS, "potholes": out}
 
 
+# What the next weeks could look like for real potholes. A week of driving can't show a repair or a
+# failed patch, so these passes after the last drive are made up; every state comes from lifecycle().
+# Pass pattern: days after the last drive, and hit (severity multiplier) or None for a clean pass.
+SCENARIOS = {
+    "left": ("Left alone past the 30-day mark", [(d, 1.0) for d in (2, 5, 7, 9, 12, 14, 16, 19, 21, 23, 26, 28, 30, 33)]),
+    "patch": ("Repaired, then the patch fails", [(2, 1.0), (5, 1.0), (7, None), (9, None), (12, None), (14, None),
+                                                (16, None), (19, None), (21, 0.9), (23, 1.1)]),
+    "worse": ("Getting worse", [(2, 1.1), (5, 1.15), (7, 1.3), (9, 1.45), (12, 1.6)]),
+    "fixed": ("Repaired and stays fixed", [(2, 1.0), (5, None), (7, None), (9, None), (12, None), (14, None), (16, None)]),
+}
+
+
+def short_date(s):
+    """Oct 1, not Oct 01."""
+    return pd.Timestamp(s).strftime("%b %#d" if sys.platform == "win32" else "%b %-d")
+
+
+def simulated_timelines(ph):
+    as_of = pd.Timestamp(ph["as_of"])
+    conf = [p for p in ph["potholes"] if p["state"] != "Suspected" and p["road"]]
+    picks = {"left": max(conf, key=lambda p: (p["days_open"], p["severity"]))}  # the oldest: the clock story
+    for key in ("patch", "worse", "fixed"):  # then the most severe, each on a different road
+        picks[key] = next(p for p in conf if all(p["road"] != q["road"] for q in picks.values()))
+    out = []
+    for key, (title, pattern) in SCENARIOS.items():
+        p = picks[key]
+        passes = [{**h, "simulated": False} for h in p["history"]]
+        passes += [{"date": str((as_of + pd.Timedelta(days=d)).date()), "hit": m is not None,
+                    "severity": round(p["severity"] * m, 1) if m else 0, "simulated": True} for d, m in pattern]
+        first = pd.Timestamp(next(x["date"] for x in passes if x["hit"]))
+        for k, x in enumerate(passes):
+            x["state"] = lifecycle([(y["hit"], y["severity"]) for y in passes[:k + 1]])
+            x["day"] = (pd.Timestamp(x["date"]) - first).days
+        last = passes[-1]
+        if key == "left":
+            crossed = next(x for x in passes if x["day"] >= CLOCK_DAYS)
+            outcome = (f"Hit on every pass. It passes the {CLOCK_DAYS}-day mark unrepaired on {short_date(crossed['date'])} "
+                       f"and is on day {last['day']} at the last pass.")
+        elif key == "patch":
+            # the patch went in between the last hit and the first clean pass; it lasted until hits came back
+            f = next(k for k, x in enumerate(passes) if x["state"] == "PatchFailed")
+            r = next(k for k, x in enumerate(passes) if x["state"] == "Repaired")
+            before = max(k for k in range(r) if passes[k]["hit"])
+            span = lambda a, b: (pd.Timestamp(passes[b]["date"]) - pd.Timestamp(passes[a]["date"])).days
+            outcome = (f"Repaired between {short_date(passes[before]['date'])} and {short_date(passes[before + 1]['date'])}, "
+                       f"counted as repaired after {REPAIR_PASSES} clean passes. Hits return on {short_date(passes[f]['date'])}: "
+                       f"the patch lasted {span(before + 1, f)} to {span(before, f)} days.")
+        elif key == "worse":
+            outcome = f"Each hit is harder than the last. Marked getting worse on day {last['day']}."
+        else:
+            outcome = f"No hits after the repair. Counted as repaired after {REPAIR_PASSES} clean passes."
+        out.append({"key": key, "title": title, "id": p["id"], "road": p["road"], "lat": p["lat"], "lon": p["lon"],
+                    "final_state": last["state"], "outcome": outcome, "passes": passes})
+    return {"as_of": ph["as_of"], "clock_days": CLOCK_DAYS, "scenarios": out}
+
+
 def brief_facts(drives, ph, top=5):
     """Every number the brief may use, as plain sentences. The language model
     only rephrases these; brief.py rejects prose with a number not in here."""
     mi = lambda windows: len(windows) * WINDOW_M / 1609.34
-    day = lambda s: pd.Timestamp(s).strftime("%b %-d") if sys.platform != "win32" else pd.Timestamp(s).strftime("%b %#d")
+    day = short_date
     windows = [w for d in drives for w in d["windows"]]
     conf = [p for p in ph["potholes"] if p["state"] != "Suspected"]
     name = lambda p: p["road"] or "an unrated road"
@@ -409,6 +465,9 @@ def main():
     (OUT / "potholes.json").write_text(json.dumps(potholes, separators=(",", ":")))
     states = pd.Series([p["state"] for p in potholes["potholes"]]).value_counts().to_dict()
     print(f"{len(potholes['potholes'])} spots as of {potholes['as_of']}: {states}")
+    timelines = simulated_timelines(potholes)
+    (OUT / "timelines.json").write_text(json.dumps(timelines, separators=(",", ":")))
+    print("simulated timelines:", ", ".join(f"{s['road']} -> {s['final_state']}" for s in timelines["scenarios"]))
     facts = brief_facts(drives, potholes)
     (OUT / "facts.json").write_text(json.dumps(facts, indent=1))
     print("\n".join(facts))
@@ -447,6 +506,9 @@ def selftest():
     assert lifecycle([H, H, M, M, M, H]) == "PatchFailed"
     assert lifecycle([H, M, M, M]) == "Suspected"          # never confirmed, never repaired
     assert angle_diff(10, 350, directed=True) == 20 and angle_diff(10, 190) == 0
+    # each simulated pattern, after two real hits, must end in the state its title promises
+    end = {k: lifecycle([H, H] + [(m is not None, 5.0 * (m or 0)) for _, m in pat]) for k, (_, pat) in SCENARIOS.items()}
+    assert end == {"left": "Confirmed", "patch": "PatchFailed", "worse": "Worsening", "fixed": "Repaired"}, end
     assert angle_diff(10, 190, directed=True) == 180       # opposite lanes stay apart
     print("selftest ok")
 

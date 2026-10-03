@@ -66,6 +66,11 @@
   .clock i { display: block; height: 100%; background: var(--work); }
   .flag { font-size: 13px; font-weight: 600; }
   .flag.Worsening { color: var(--poor); }
+  .row.future { grid-template-columns: 1fr; }
+  .tl-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .tl-head b { font-weight: 600; }
+  .seg + div, .seg + p { margin-top: 14px; }
+  #r-now-body > * + *, #r-next-body > * + * { margin-top: 14px; }
 
   /* controls */
   .controls { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -251,8 +256,8 @@ function renderLegend() {
 }
 
 async function init() {
-  const [index, segs, sections, ph, fc, brief, models, chat] = await Promise.all(['index', 'segments', 'sections',
-    'potholes', 'forecast', 'brief', 'models', 'webchat'].map(n => json(`data/out/${n}.json`)));
+  const [index, segs, sections, ph, fc, brief, models, chat, timelines] = await Promise.all(['index', 'segments',
+    'sections', 'potholes', 'forecast', 'brief', 'models', 'webchat', 'timelines'].map(n => json(`data/out/${n}.json`)));
   roughPct = index.rough_pct;
   document.getElementById('asof').textContent = `${index.drives.length} drives, as of ${fmtDate(ph.as_of)}`;
 
@@ -265,7 +270,7 @@ async function init() {
     <span class="sw"><i style="background:${C.good}"></i>good</span><span class="sw"><i style="background:${C.fair}"></i>fair</span>
     <span class="sw"><i style="background:${C.poor}"></i>poor</span></div>`;
 
-  renderRepairs(ph);
+  renderRepairs(ph, timelines);
   renderDrives(index);
   if (fc) renderForecast(fc, segs);
   if (brief) renderBrief(brief);
@@ -284,7 +289,7 @@ async function init() {
 }
 
 const potholesById = {};
-function renderRepairs(ph) {
+function renderRepairs(ph, timelines) {
   PH = ph;
   ph.potholes.forEach(p => potholesById[p.id] = p);
   const popup = p => `${blade(p.road)}<br>
@@ -306,7 +311,10 @@ function renderRepairs(ph) {
     <div class="key">Bigger dot, harder hit.</div>`;
 
   const el = document.getElementById('repairs');
-  el.innerHTML = `<p class="lede"><b>${conf.length} potholes</b> hit on two or more passes, hardest first.
+  el.innerHTML = `${timelines ? `<div class="seg" role="group" aria-label="Show">
+      <button id="r-now" aria-pressed="true">Now</button><button id="r-next" aria-pressed="false">Next weeks, simulated</button>
+    </div>` : ''}<div id="r-now-body">
+    <p class="lede"><b>${conf.length} potholes</b> hit on two or more passes, hardest first.
     The bar counts days since the first hit toward the ${ph.clock_days}-day mark.</p>
     <label class="check"><input type="checkbox" id="one-pass"> Also show ${one} spots hit only once</label>
     <ol class="list">${conf.slice(0, 40).map(p => `<li><button class="row" data-id="${p.id}">
@@ -315,8 +323,62 @@ function renderRepairs(ph) {
       <span class="clock"><span><i style="width:${Math.min(100, 100 * p.days_open / ph.clock_days)}%"></i></span>
         day ${p.days_open} of ${ph.clock_days}${p.state !== 'Confirmed' ? ` <span class="flag ${p.state}">${stateName[p.state]}</span>` : ''}</span>
     </button></li>`).join('')}</ol>
-    ${conf.length > 40 ? `<p class="small">The other ${conf.length - 40} are on the map.</p>` : ''}`;
+    ${conf.length > 40 ? `<p class="small">The other ${conf.length - 40} are on the map.</p>` : ''}</div>
+    <div id="r-next-body" hidden></div>`;
   el.querySelector('#one-pass').onchange = () => setView('repairs');
+  if (timelines) {
+    renderTimelines(timelines, el.querySelector('#r-next-body'));
+    for (const [id, body] of [['r-now', 'r-now-body'], ['r-next', 'r-next-body']]) el.querySelector(`#${id}`).onclick = () => {
+      el.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', b.id === id));
+      el.querySelector('#r-now-body').hidden = body !== 'r-now-body';
+      el.querySelector('#r-next-body').hidden = body !== 'r-next-body';
+    };
+  }
+  el.querySelectorAll('.row').forEach(b => b.onclick = () => {
+    const p = potholesById[b.dataset.id];
+    map.setView([p.lat, p.lon], 17);
+    p.marker.openPopup();
+  });
+}
+
+// A week of driving can't show a repair: real potholes, made-up passes after the last drive, real lifecycle rules.
+function renderTimelines(t, el) {
+  const W = 340, H = 76, pad = 8, track = 26;  // W is the panel's width, so text stays at real size
+  const all = t.scenarios.flatMap(s => s.passes.map(x => +new Date(x.date + 'T12:00')));
+  const t0 = Math.min(...all), t1 = Math.max(...all);
+  const X = d => pad + (W - 2 * pad) * ((+new Date(d + 'T12:00')) - t0) / (t1 - t0);
+  const addDays = (d, n) => new Date(+new Date(d + 'T12:00') + n * 864e5).toISOString().slice(0, 10);
+  const asOf = X(t.as_of);
+  const svg = s => {
+    const first = s.passes.find(x => x.hit).date, mark = X(addDays(first, t.clock_days));
+    const bands = s.passes.slice(0, -1).map((x, k) => `<rect x="${X(x.date)}" y="${track + 9}" width="${X(s.passes[k + 1].date) - X(x.date)}"
+      height="5" fill="${stateColor[x.state]}"/>`).join('');
+    // label each state change; walking back from the final state, drop a label with no room before the next
+    const changes = [];
+    for (const x of s.passes.filter((x, k) => k === 0 || x.state !== s.passes[k - 1].state).reverse())
+      if (!changes.length || X(changes[0].date) - X(x.date) >= 64) changes.unshift(x);
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${esc(s.title)}: ${esc(s.outcome)}">
+      <defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <line x1="0" y1="0" x2="0" y2="6" stroke="#50555c" stroke-width="2.5"/></pattern></defs>
+      <rect x="${asOf}" y="0" width="${W - pad - asOf}" height="${track + 16}" fill="url(#hatch)"/>
+      <line x1="${asOf}" x2="${asOf}" y1="0" y2="${track + 16}" stroke="${css('--faded')}"/>
+      <text x="${asOf + 4}" y="11" font-size="11" fill="${css('--faded')}">simulated after the last drive</text>
+      <line x1="${pad}" x2="${W - pad}" y1="${track}" y2="${track}" stroke="${C.seam}" stroke-width="2"/>
+      ${mark <= W - pad ? `<line x1="${mark}" x2="${mark}" y1="4" y2="${track + 16}" stroke="${C.work}" stroke-dasharray="3 3"/>
+        <text x="${mark - 3}" y="${track - 8}" font-size="11" text-anchor="end" fill="${C.work}">day ${t.clock_days}</text>` : ''}
+      ${bands}
+      ${s.passes.map(x => x.hit
+        ? `<circle cx="${X(x.date)}" cy="${track}" r="${3 + Math.min(x.severity, 20) / 5}" fill="${C.work}" stroke="#1b1b1b"/>`
+        : `<circle cx="${X(x.date)}" cy="${track}" r="3.5" fill="${css('--asphalt')}" stroke="${css('--faded')}" stroke-width="1.5"/>`).join('')}
+      ${changes.map(x => `<text x="${Math.min(X(x.date), W - 70)}" y="${track + 30}" font-size="11" fill="${stateColor[x.state]}">${stateName[x.state]}</text>`).join('')}
+    </svg>`;
+  };
+  el.innerHTML = `<p class="lede">A week of driving can't show a repair. These are real potholes with made-up passes
+      after ${fmtDate(t.as_of)}, run through the same rules the system uses.</p>
+    <p class="small">Filled dot: hit, bigger is harder. Open dot: passed with no hit. The band shows the state after each pass.</p>
+    <ol class="list">${t.scenarios.map(s => `<li><button class="row future" data-id="${s.id}">
+      <span class="tl-head">${blade(s.road)} <b>${esc(s.title)}</b></span>${svg(s)}
+      <span class="small">${esc(s.outcome)}</span></button></li>`).join('')}</ol>`;
   el.querySelectorAll('.row').forEach(b => b.onclick = () => {
     const p = potholesById[b.dataset.id];
     map.setView([p.lat, p.lon], 17);
