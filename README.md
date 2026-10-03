@@ -42,3 +42,12 @@ cloudflared tunnel --url http://localhost:8000          # public URL for the age
 ```
 
 The tunnel makes the backend public. Through it only `/api/` answers; the dashboard and `data/out/` (raw drive tracks) stay local.
+
+## Deterioration forecast
+
+```
+.venv-ml/Scripts/python ttm_forecast.py    # IBM Granite TTM, zero-shot and fine-tuned -> data/out/ttm_2020.npz
+python forecast.py                         # backtest 2020 -> 2024 and 2028 risk per segment -> data/out/forecast.json
+```
+
+Backtested on SEMCOG's own PASER history: models see nothing after 2020 and are scored on the real 2024 ratings.

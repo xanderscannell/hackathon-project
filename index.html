@@ -22,10 +22,10 @@
   .pill { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 8px; color: #111; font-weight: 600; }
   .clock { height: 4px; background: #333; border-radius: 2px; margin-top: 3px; }
   .clock div { height: 100%; border-radius: 2px; background: var(--accent); }
-  #brief { display: none; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100% - 32px));
+  .modal { display: none; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100% - 32px));
            max-height: 80%; overflow-y: auto; z-index: 1100; }
-  #brief p { line-height: 1.5; }
-  #brief ul { padding-left: 18px; margin: 4px 0; }
+  .modal p { line-height: 1.5; }
+  .modal ul { padding-left: 18px; margin: 4px 0; }
   .ghost { background: #2a2a2a; color: var(--fg); border: 1px solid #444; font-weight: 400; }
   a { color: var(--accent); }
   h1 { font-size: 15px; margin: 0 0 8px; }
@@ -57,13 +57,15 @@
   <h1>Road Condition Map</h1>
   <div class="row"><select id="drive"></select><button id="play">Replay</button></div>
   <div class="row"><select id="mode"><option value="est">Estimated PASER</option><option value="rough">Roughness</option></select>
-    <button id="briefBtn" class="ghost" hidden>Weekly brief</button></div>
+    <button id="briefBtn" class="ghost" hidden>Weekly brief</button>
+    <button id="forecastBtn" class="ghost" hidden>Forecast</button></div>
   <div class="stat" id="stats"></div>
   <div class="legend" id="legend"></div>
 </div>
 <div id="acc" class="card"></div>
 <div id="rank" class="card"></div>
-<div id="brief" class="card"></div>
+<div id="brief" class="card modal"></div>
+<div id="forecast" class="card modal"></div>
 <div id="chat"></div>
 <script>
 const map = L.map('map', { preferCanvas: true }).setView([42.2, -83.3], 11);
@@ -107,9 +109,11 @@ async function init() {
       median roughness ${s.rn} m/s² (normalized to 45 mph)`)));
   const ph = await json('data/out/potholes.json');
   const [confirmed, suspected] = potholeLayers(ph);
-  L.control.layers(null, { 'Rated PASER (SEMCOG)': paser, 'Estimated PASER by section': est,
-    'Potholes (confirmed)': confirmed, 'Suspected (one pass)': suspected },
-    { position: 'topright', collapsed: false }).addTo(map);
+  const fc = await fetch('data/out/forecast.json').then(r => r.ok ? r.json() : null).catch(() => null);
+  const overlays = { 'Rated PASER (SEMCOG)': paser, 'Estimated PASER by section': est,
+    'Potholes (confirmed)': confirmed, 'Suspected (one pass)': suspected };
+  if (fc) overlays[`Risk of poor by ${fc.forward.to}`] = forecastLayer(fc, segs);
+  L.control.layers(null, overlays, { position: 'topright', collapsed: false }).addTo(map);
 
   renderAccuracy(index.accuracy);
   const chat = await fetch('data/out/webchat.json').then(r => r.ok ? r.json() : null).catch(() => null);
@@ -128,6 +132,30 @@ async function init() {
 const stateColor = { Suspected: '#888', Confirmed: '#f28c28', Worsening: '#e0245e', Repaired: '#2e9d4a', PatchFailed: '#a259ff' };
 const pill = s => `<span class="pill" style="background:${stateColor[s]}">${s}</span>`;
 const fmtDate = s => new Date(s + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+function forecastLayer(fc, segs) {
+  const b = fc.backtest, pct = x => `${Math.round(x * 100)}%`;
+  const riskColor = r => mix('#3a3a3a', '#e0245e', Math.min(r / 0.6, 1));
+  const layer = L.layerGroup(fc.forward.risk.map(([id, r]) => L.polyline(segs[id].coords,
+    { color: riskColor(r), weight: 2 + 4 * Math.min(r / 0.6, 1), opacity: 0.9 })
+    .bindPopup(`<b>${esc(segs[id].name)}</b><br>Rated PASER ${segs[id].paser} now<br>
+      Chance of poor (1-4) by ${fc.forward.to}: <b>${pct(r)}</b>`)));
+  const card = document.getElementById('forecast'), btn = document.getElementById('forecastBtn');
+  card.innerHTML = `<h1>Which roads fall to poor next?</h1>
+    <p>Backtest on SEMCOG's own history: the model saw ratings through ${b.origin} only. Of the ${pct(b.top_share)} of
+    fair and good miles it flagged as most at risk, <b>${pct(b.top_hit)}</b> were rated poor by ${b.target},
+    against ${pct(b.base_rate)} of all fair and good miles.</p>
+    <h2>Forecasting every segment's ${b.target} rating, ${b.miles} miles</h2>
+    <table class="models"><tr><th></th><th>within 1</th><th>MAE</th><th title="ranks roads that fell to poor above those that did not; 0.5 is a coin flip">falls to poor</th></tr>
+    ${b.models.map(m => `<tr title="${esc(m.what)}"><td>${esc(m.name)}</td><td>${pct(m.within1)}</td><td>${m.mae}</td><td>${m.auc_fall}</td></tr>`).join('')}</table>
+    <div class="note">Weighted by miles. Models learned from forecasts made in 2012, 2014 and 2016; none saw a rating after ${b.origin}.
+      The map layer applies the same method from ${fc.forward.from} to ${fc.forward.to}.</div>
+    <button class="ghost" id="forecastClose" style="margin-top:10px">Close</button>`;
+  btn.hidden = false;
+  btn.onclick = () => card.style.display = card.style.display === 'block' ? 'none' : 'block';
+  document.getElementById('forecastClose').onclick = () => card.style.display = 'none';
+  return layer;
+}
 
 let PH;
 function potholeLayers(ph) {
