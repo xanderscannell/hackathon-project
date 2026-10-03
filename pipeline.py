@@ -316,6 +316,37 @@ def build_potholes(drives, segs, pieces):
     return {"as_of": str(as_of), "clock_days": CLOCK_DAYS, "potholes": out}
 
 
+def brief_facts(drives, ph, top=5):
+    """Every number the brief may use, as plain sentences. The language model
+    only rephrases these; brief.py rejects prose with a number not in here."""
+    mi = lambda windows: len(windows) * WINDOW_M / 1609.34
+    day = lambda s: pd.Timestamp(s).strftime("%b %-d") if sys.platform != "win32" else pd.Timestamp(s).strftime("%b %#d")
+    windows = [w for d in drives for w in d["windows"]]
+    conf = [p for p in ph["potholes"] if p["state"] != "Suspected"]
+    name = lambda p: p["road"] or "an unrated road"
+    facts = [
+        f"As of {day(ph['as_of'])}, the test vehicle measured {mi(windows):.0f} miles of road over "
+        f"{len(drives)} drives, {mi([w for w in windows if w['seg'] < 0]):.1f} miles of it on roads with no PASER rating.",
+        f"{len(conf)} potholes are confirmed, each hit on two or more passes; "
+        f"{len(ph['potholes']) - len(conf)} more were hit once and are not confirmed.",
+        f"The {top} most severe confirmed potholes:",
+    ]
+    facts += [f"{i}. {name(p)}: severity {p['severity']}, hit on {p['hit_passes']} of {p['passes']} passes, "
+              f"first seen {day(p['first_seen'])}, {ph['clock_days'] - p['days_open']} days before the "
+              f"{ph['clock_days']}-day mark." for i, p in enumerate(conf[:top], 1)]
+    worse = [p for p in conf if p["state"] == "Worsening"]
+    if worse:
+        facts.append(f"{len(worse)} confirmed potholes are getting worse: "
+                     + "; ".join(f"{name(p)} (severity {p['severity']})" for p in worse) + ".")
+    counts = pd.Series([p["road"] or "unrated roads" for p in conf]).value_counts().head(3)
+    facts.append("Roads with the most confirmed potholes: "
+                 + "; ".join(f"{r} ({n})" for r, n in counts.items()) + ".")
+    oldest = max(conf, key=lambda p: p["days_open"])
+    facts.append(f"The oldest confirmed pothole is on {name(oldest)}, first seen {day(oldest['first_seen'])}: "
+                 f"{ph['clock_days'] - oldest['days_open']} days before the {ph['clock_days']}-day mark.")
+    return facts
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     segs, pieces = load_segments()
@@ -378,6 +409,9 @@ def main():
     (OUT / "potholes.json").write_text(json.dumps(potholes, separators=(",", ":")))
     states = pd.Series([p["state"] for p in potholes["potholes"]]).value_counts().to_dict()
     print(f"{len(potholes['potholes'])} spots as of {potholes['as_of']}: {states}")
+    facts = brief_facts(drives, potholes)
+    (OUT / "facts.json").write_text(json.dumps(facts, indent=1))
+    print("\n".join(facts))
     print(f"fit PASER = {a:.2f} {b:+.2f} ln(roughness) on {len(train_s)} sections")
     print(f"test: {accuracy['sections']} sections, within one grade {accuracy['within1']:.0%}, "
           f"MAE {accuracy['mae']}; always guessing {guess}: {accuracy['guess_within1']:.0%}, "

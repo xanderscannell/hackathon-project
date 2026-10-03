@@ -22,6 +22,12 @@
   .pill { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 8px; color: #111; font-weight: 600; }
   .clock { height: 4px; background: #333; border-radius: 2px; margin-top: 3px; }
   .clock div { height: 100%; border-radius: 2px; background: var(--accent); }
+  #brief { display: none; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100% - 32px));
+           max-height: 80%; overflow-y: auto; z-index: 1100; }
+  #brief p { line-height: 1.5; }
+  #brief ul { padding-left: 18px; margin: 4px 0; }
+  .ghost { background: #2a2a2a; color: var(--fg); border: 1px solid #444; font-weight: 400; }
+  a { color: var(--accent); }
   h1 { font-size: 15px; margin: 0 0 8px; }
   h2 { font-size: 13px; margin: 0 0 6px; }
   select, button { font: inherit; background: #2a2a2a; color: var(--fg); border: 1px solid #444;
@@ -45,12 +51,14 @@
 <div id="panel" class="card">
   <h1>Road Condition Map</h1>
   <div class="row"><select id="drive"></select><button id="play">Replay</button></div>
-  <div class="row"><select id="mode"><option value="est">Estimated PASER</option><option value="rough">Roughness</option></select></div>
+  <div class="row"><select id="mode"><option value="est">Estimated PASER</option><option value="rough">Roughness</option></select>
+    <button id="briefBtn" class="ghost" hidden>Weekly brief</button></div>
   <div class="stat" id="stats"></div>
   <div class="legend" id="legend"></div>
 </div>
 <div id="acc" class="card"></div>
 <div id="rank" class="card"></div>
+<div id="brief" class="card"></div>
 <script>
 const map = L.map('map', { preferCanvas: true }).setView([42.2, -83.3], 11);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -98,6 +106,8 @@ async function init() {
     { position: 'topright', collapsed: false }).addTo(map);
 
   renderAccuracy(index.accuracy);
+  const brief = await fetch('data/out/brief.json').then(r => r.ok ? r.json() : null).catch(() => null);
+  if (brief) renderBrief(brief);
   const sel = document.getElementById('drive'), mode = document.getElementById('mode');
   sel.innerHTML = index.drives.map(d => `<option>${d}</option>`).join('');
   sel.onchange = mode.onchange = () => show(sel.value, false);
@@ -109,8 +119,12 @@ const stateColor = { Suspected: '#888', Confirmed: '#f28c28', Worsening: '#e0245
 const pill = s => `<span class="pill" style="background:${stateColor[s]}">${s}</span>`;
 const fmtDate = s => new Date(s + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
+let PH;
 function potholeLayers(ph) {
-  const popup = p => `<b>${p.road ? esc(p.road) : 'Unrated road'}</b>${p.paser ? ` (PASER ${p.paser})` : ''}<br>
+  PH = ph;
+  ph.potholes.forEach(p => potholesById[p.id] = p);
+  const popup = p => `<b>${p.road ? esc(p.road) : 'Unrated road'}</b>${p.paser ? ` (PASER ${p.paser})` : ''}
+    · <a href="#" onclick="workOrder(${p.id}); return false">Work order</a><br>
     ${pill(p.state)} severity ${p.severity} m/s², hit on ${p.hit_passes} of ${p.passes} passes<br>
     First seen ${fmtDate(p.first_seen)}: day ${p.days_open} of ${ph.clock_days}<br>
     <div class="note">${p.history.map(h => `${fmtDate(h.date)} ${h.hit ? `hit, ${h.severity}` : 'passed, no hit'}`).join('<br>')}</div>`;
@@ -135,6 +149,43 @@ function potholeLayers(ph) {
     p.marker.openPopup();
   });
   return [confirmed, suspected];
+}
+
+function renderBrief(b) {
+  const card = document.getElementById('brief'), btn = document.getElementById('briefBtn');
+  card.innerHTML = `<h1>Weekly brief</h1>
+    ${b.brief ? `<p>${esc(b.brief)}</p>` : '<p class="note">No brief passed the number check; the facts below are the record.</p>'}
+    <div class="note">Written by ${esc(b.model)} from the facts below, ${esc(b.generated)}.
+      Checked: every number in it appears in the facts.</div>
+    <h2 style="margin-top:12px">The record (computed, not generated)</h2>
+    <ul class="note">${b.facts.map(f => `<li>${esc(f)}</li>`).join('')}</ul>
+    <button class="ghost" id="briefClose">Close</button>`;
+  btn.hidden = false;
+  btn.onclick = () => card.style.display = card.style.display === 'block' ? 'none' : 'block';
+  document.getElementById('briefClose').onclick = () => card.style.display = 'none';
+}
+
+const potholesById = {};
+function workOrder(id) {
+  const p = potholesById[id];
+  const dir = ['northbound', 'eastbound', 'southbound', 'westbound'][Math.round(p.heading / 90) % 4];
+  const left = PH.clock_days - p.days_open;
+  const html = `<!doctype html><meta charset="utf-8"><title>Work order WO-${p.id}</title>
+    <style>body{font:14px system-ui,sans-serif;max-width:640px;margin:32px auto;padding:0 16px}
+    td{padding:4px 12px 4px 0;vertical-align:top}td:first-child{color:#666}table{border-collapse:collapse}</style>
+    <h2>Work order WO-${p.id}</h2>
+    <table>
+      <tr><td>Road</td><td>${p.road ? esc(p.road) : 'Unrated road'}${p.paser ? ` (rated PASER ${p.paser})` : ''}, ${dir} lane</td></tr>
+      <tr><td>Location</td><td>${p.lat}, ${p.lon} (<a href="https://www.google.com/maps?q=${p.lat},${p.lon}">map</a>)</td></tr>
+      <tr><td>Status</td><td>${p.state}, hit on ${p.hit_passes} of ${p.passes} passes</td></tr>
+      <tr><td>Severity</td><td>${p.severity} m/s² (speed-normalized peak)</td></tr>
+      <tr><td>First detected</td><td>${fmtDate(p.first_seen)}: day ${p.days_open} of ${PH.clock_days}, ${left} days before the ${PH.clock_days}-day mark</td></tr>
+      <tr><td>Pass history</td><td>${p.history.map(h => `${fmtDate(h.date)}: ${h.hit ? `hit, severity ${h.severity}` : 'passed, no hit'}`).join('<br>')}</td></tr>
+      <tr><td>Action</td><td>Inspect and repair. Record the repair date and method.</td></tr>
+    </table>
+    <p style="color:#666;font-size:12px">Generated from fleet sensor data as of ${fmtDate(PH.as_of)}. The detection date is a
+    best case: the defect may have existed before the fleet first hit it. Triage estimate, not a legal determination.</p>`;
+  window.open(URL.createObjectURL(new Blob([html], { type: 'text/html' })));
 }
 
 function renderAccuracy(a) {
