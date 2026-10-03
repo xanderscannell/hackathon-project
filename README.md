@@ -37,11 +37,11 @@ python model.py                            # every model on the same held-out se
 .venv/Scripts/orchestrate agents deploy -n road_desk
 .venv/Scripts/python orchestrate/webchat_config.py      # embeds the chat in the dashboard
 
-cloudflared tunnel --url http://localhost:8000          # public URL for the agent's tools
-.venv/Scripts/orchestrate connections set-credentials -a road_api --env draft -e "url=<tunnel url>"   # and --env live
+sh deploy_api.sh                                        # read-only API on IBM Code Engine, prints its URL
+.venv/Scripts/orchestrate connections set-credentials -a road_api --env draft -e "url=<api url>"   # and --env live
 ```
 
-The tunnel makes the backend public. Through it only `/api/` answers; the dashboard and `data/out/` (raw drive tracks) stay local.
+The deployed API is public, so it answers only `/api/` and carries only the three files the API reads; the dashboard and the raw drive tracks stay local. For a quick local test, `cloudflared tunnel --url http://localhost:8000` works too: requests through it also get `/api/` only.
 
 ## Deterioration forecast
 

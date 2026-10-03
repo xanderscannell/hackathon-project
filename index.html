@@ -25,7 +25,7 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--asphalt); color: var(--paint);
     font: 15px/1.45 Overpass, "Highway Gothic", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
-  body { display: grid; grid-template-columns: var(--side) 1fr; }
+  #app { display: grid; grid-template-columns: var(--side) 1fr; height: 100vh; }  /* not body: widgets inject into body */
   h1, h2, p { margin: 0; }
   button, select, input { font: inherit; color: inherit; }
   :focus-visible { outline: 2px solid var(--work); outline-offset: 2px; }
@@ -129,7 +129,7 @@
   .leaflet-control-attribution a { color: var(--faded); }
 
   @media (max-width: 820px) {
-    body { grid-template-columns: 1fr; grid-template-rows: 52vh 1fr; }
+    #app { grid-template-columns: 1fr; grid-template-rows: 52vh 1fr; height: auto; }
     #map { height: 52vh; grid-row: 1; }
     #side { grid-row: 2; height: auto; min-height: 48vh; border-right: 0; border-top: 1px solid var(--seam); }
     #legend { left: 16px; bottom: auto; top: calc(52vh - 16px); transform: translateY(-100%); }
@@ -139,6 +139,7 @@
 </style>
 </head>
 <body>
+<div id="app">
 <aside id="side">
   <header class="brand">
     <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
@@ -174,6 +175,7 @@
   <section class="panel" id="accuracy" role="tabpanel" aria-labelledby="t-accuracy" hidden></section>
 </aside>
 <div id="map" role="region" aria-label="Map"></div>
+</div>
 <div id="legend"></div>
 <div id="chat"></div>
 <script>
@@ -491,7 +493,8 @@ function renderAccuracy(a, models) {
 // Road Desk agent (watsonx Orchestrate web chat); ids from orchestrate/webchat_config.py
 function loadChat(c) {
   window.wxOConfiguration = { orchestrationID: c.orchestrationID, hostURL: c.hostURL, rootElementID: 'chat',
-    showLauncher: true, chatOptions: { agentId: c.agentId, agentEnvironmentId: c.agentEnvironmentId } };
+    showLauncher: true, chatOptions: { agentId: c.agentId, agentEnvironmentId: c.agentEnvironmentId },
+    ...(c.crn && { crn: c.crn, deploymentPlatform: c.deploymentPlatform }) };  // IBM Cloud instances need both
   const s = document.createElement('script');
   s.src = `${c.hostURL}/wxochat/wxoLoader.js?embed=true`;
   s.onload = () => wxoLoader.init();

@@ -23,15 +23,25 @@ env = cfg.read(CONTEXT_SECTION_HEADER, CONTEXT_ACTIVE_ENV_OPT)
 url = cfg.get(ENVIRONMENTS_SECTION_HEADER, env, ENV_WXO_URL_OPT)
 token = Config(AUTH_CONFIG_FILE_FOLDER, AUTH_CONFIG_FILE).get(AUTH_SECTION_HEADER)[env][AUTH_MCSP_TOKEN_OPT]
 
-aud = jwt.decode(token, options={"verify_signature": False})["aud"]
-crn = next(a for a in (aud if isinstance(aud, list) else [aud]) if a.startswith("crn:"))
-account, instance = crn.split("sub/")[1].split(":")[:2]
+claims = jwt.decode(token, options={"verify_signature": False})
+host = url.replace("https://api.", "https://", 1).split(".com")[0] + ".com"
+extra = {}
+if "cloud.ibm.com" in url:  # IBM Cloud instance: account from the IAM token, instance from the URL
+    account, instance = claims["account"]["bss"], url.rstrip("/").split("/instances/")[1]
+    region = host.split("//")[1].split(".")[0]
+    extra = {"crn": f"crn:v1:bluemix:public:watsonx-orchestrate:{region}:a/{account}:{instance}::",
+             "deploymentPlatform": "ibmcloud"}
+else:  # trial: both ids sit in the token's CRN audience
+    aud = claims["aud"]
+    crn = next(a for a in (aud if isinstance(aud, list) else [aud]) if a.startswith("crn:"))
+    account, instance = crn.split("sub/")[1].split(":")[:2]
 agent = instantiate_client(AgentClient).get_draft_by_name(agent_name)[0]
 config = {
     "orchestrationID": f"{account}_{instance}",
-    "hostURL": url.replace("https://api.", "https://", 1).split(".com")[0] + ".com",
+    "hostURL": host,
     "agentId": agent["id"],
     "agentEnvironmentId": next(e["id"] for e in agent["environments"] if e["name"] == "live"),
+    **extra,
 }
 Path("data/out/webchat.json").write_text(json.dumps(config, indent=1))
 print("wrote data/out/webchat.json for", agent_name)

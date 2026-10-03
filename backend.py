@@ -3,20 +3,23 @@
     python backend.py            # http://localhost:8000
     python backend.py --selftest
 
-Locally: index.html, data/out/ and /api/. Through the Cloudflare tunnel (requests
-carrying Cf-Connecting-Ip): /api/ only, since data/out holds raw drive tracks.
+Locally: index.html, data/out/ and /api/. Public (API_ONLY set, as on Code Engine,
+or requests through a Cloudflare tunnel): /api/ only, since data/out holds raw drive tracks.
 Nothing else in the repo is ever served. Every miss answers with a
 sentence the agent can't skip, never an empty list.
 """
 import json
+import os
 import re
 import sys
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-OUT = Path("data/out")
-PORT = 8000
+OUT = Path(os.environ.get("DATA_DIR", "data/out"))
+HOST = os.environ.get("HOST", "127.0.0.1")
+PORT = int(os.environ.get("PORT", 8000))
+API_ONLY = bool(os.environ.get("API_ONLY"))  # set in the Code Engine container: it is public
 ALIASES = {"road": "rd", "avenue": "ave", "street": "st", "drive": "dr", "highway": "hwy", "north": "n",
            "south": "s", "east": "e", "west": "w"}
 ESTIMATE_NOTE = ("The estimate comes from measured roughness and is within one grade of the rated value on about "
@@ -125,8 +128,8 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
-        elif self.headers.get("Cf-Connecting-Ip"):
-            # through the tunnel: API only. data/out holds raw drive tracks and account ids.
+        elif API_ONLY or self.headers.get("Cf-Connecting-Ip"):
+            # public (Code Engine, or the tunnel): API only. data/out holds raw drive tracks and account ids.
             self.send_error(404)
         elif url.path in ("/", "/index.html") or (url.path.startswith("/data/out/") and ".." not in url.path):
             super().do_GET()
@@ -152,5 +155,5 @@ if __name__ == "__main__":
     if "--selftest" in sys.argv:
         selftest()
     else:
-        print(f"http://localhost:{PORT}")
-        ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+        print(f"http://{HOST}:{PORT}")
+        ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
