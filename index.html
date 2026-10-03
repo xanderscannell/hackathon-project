@@ -11,37 +11,52 @@
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px system-ui, sans-serif; }
   #map { position: absolute; inset: 0; background: var(--bg); }
   .dark-tiles { filter: invert(1) hue-rotate(180deg) brightness(0.7) contrast(0.9); }
-  #panel { position: absolute; top: 12px; left: 12px; z-index: 1000; background: var(--panel);
-           padding: 12px 14px; border-radius: 8px; min-width: 240px; box-shadow: 0 2px 12px #0008; }
-  #panel h1 { font-size: 15px; margin: 0 0 8px; }
+  .card { position: absolute; z-index: 1000; background: var(--panel); padding: 12px 14px;
+          border-radius: 8px; box-shadow: 0 2px 12px #0008; }
+  #panel { top: 12px; left: 12px; min-width: 250px; }
+  #acc { bottom: 24px; left: 12px; max-width: 300px; }
+  h1 { font-size: 15px; margin: 0 0 8px; }
+  h2 { font-size: 13px; margin: 0 0 6px; }
   select, button { font: inherit; background: #2a2a2a; color: var(--fg); border: 1px solid #444;
                    border-radius: 4px; padding: 4px 8px; }
   button { background: var(--accent); color: #111; border: 0; font-weight: 600; cursor: pointer; }
   .row { display: flex; gap: 8px; margin-bottom: 8px; }
-  .stat { color: var(--muted); line-height: 1.6; }
-  .stat b { color: var(--fg); }
+  .stat, .note { color: var(--muted); line-height: 1.6; }
+  .note { font-size: 12px; line-height: 1.4; margin-top: 6px; }
+  .stat b, .note b { color: var(--fg); }
   .legend { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; margin-top: 6px; }
-  .ramp { flex: 1; height: 8px; border-radius: 4px;
-          background: linear-gradient(90deg, #3a7bd5, #f5f5f5, #f28c28, #e0245e); }
+  .ramp { flex: 1; height: 8px; border-radius: 4px; }
   .mark { width: 12px; height: 12px; background: var(--accent); transform: rotate(45deg); border: 2px solid #111; }
   .car { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 3px solid var(--accent); }
+  table.cm { border-collapse: collapse; font-size: 11px; margin-top: 6px; }
+  .cm td, .cm th { width: 20px; height: 18px; text-align: center; padding: 0; color: var(--fg); }
+  .cm th { color: var(--muted); font-weight: 400; }
 </style>
 </head>
 <body>
 <div id="map"></div>
-<div id="panel">
+<div id="panel" class="card">
   <h1>Road Condition Map</h1>
   <div class="row"><select id="drive"></select><button id="play">Replay</button></div>
+  <div class="row"><select id="mode"><option value="est">Estimated PASER</option><option value="rough">Roughness</option></select></div>
   <div class="stat" id="stats"></div>
-  <div class="legend">smooth <div class="ramp"></div> rough</div>
+  <div class="legend" id="legend"></div>
 </div>
+<div id="acc" class="card"></div>
 <script>
 const map = L.map('map', { preferCanvas: true }).setView([42.2, -83.3], 11);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap', maxZoom: 19, className: 'dark-tiles' }).addTo(map);
 
+// Michigan's grouping: 8-10 good, 5-7 fair, 1-4 poor
 const paserColor = p => p >= 8 ? '#2e9d4a' : p >= 5 ? '#e5b100' : '#d9342b';
 const ramp = ['#3a7bd5', '#f5f5f5', '#f28c28', '#e0245e'];
+const legends = {
+  rough: `smooth <div class="ramp" style="background:linear-gradient(90deg,${ramp})"></div> rough`,
+  est: `<div class="ramp" style="background:linear-gradient(90deg,#d9342b 0 33%,#e5b100 33% 66%,#2e9d4a 66%)"></div>
+        <span>poor · fair · good</span>`,
+};
+const esc = s => String(s).replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
 let pct, driveLayer, timer;
 
 function mix(a, b, f) {
@@ -55,34 +70,66 @@ function roughColor(r) {
   const i = Math.min(Math.floor(f), ramp.length - 2);
   return mix(ramp[i], ramp[i + 1], f - i);
 }
+const json = async url => (await fetch(url)).json();
 
 async function init() {
-  const index = await (await fetch('data/out/index.json')).json();
+  const index = await json('data/out/index.json');
   pct = index.rough_pct;
-  const segs = await (await fetch('data/out/segments.json')).json();
-  const paser = L.layerGroup(segs.map(s => L.polyline(s.coords, { color: paserColor(s.paser), weight: 2, opacity: 0.45 })
-    .bindPopup(`<b>${s.name}</b><br>PASER ${s.paser} (rated ${s.evalyear})<br>${s.surface}`))).addTo(map);
-  L.control.layers(null, { 'SEMCOG PASER': paser }, { position: 'topright' }).addTo(map);
+  const [segs, sections] = await Promise.all([json('data/out/segments.json'), json('data/out/sections.json')]);
 
-  const sel = document.getElementById('drive');
+  const paser = L.layerGroup(segs.map(s => L.polyline(s.coords, { color: paserColor(s.paser), weight: 2, opacity: 0.45 })
+    .bindPopup(`<b>${esc(s.name)}</b><br>Rated PASER ${s.paser} (${s.evalyear})<br>${esc(s.surface)}`))).addTo(map);
+  const est = L.layerGroup(sections.map(s => L.polyline(s.coords, { color: paserColor(s.est), weight: 7, opacity: 0.85 })
+    .bindPopup(`<b>${esc(s.name)}</b><br>Estimated PASER <b>${s.est}</b>, rated ${s.paser}<br>
+      ${s.n} windows over ${s.passes} pass${s.passes > 1 ? 'es' : ''}<br>
+      median roughness ${s.rn} m/s² (normalized to 45 mph)`)));
+  L.control.layers(null, { 'Rated PASER (SEMCOG)': paser, 'Estimated PASER by section': est },
+    { position: 'topright', collapsed: false }).addTo(map);
+
+  renderAccuracy(index.accuracy);
+  const sel = document.getElementById('drive'), mode = document.getElementById('mode');
   sel.innerHTML = index.drives.map(d => `<option>${d}</option>`).join('');
-  sel.onchange = () => show(sel.value, false);
+  sel.onchange = mode.onchange = () => show(sel.value, false);
   document.getElementById('play').onclick = () => show(sel.value, true);
   show(index.drives[0], false);
+}
+
+function renderAccuracy(a) {
+  const grid = Array.from({ length: 10 }, () => Array(10).fill(0));
+  a.pairs.forEach(([p, e]) => grid[p - 1][e - 1]++);
+  const max = Math.max(...grid.flat());
+  const used = [...new Set(a.pairs.flat())].sort((x, y) => x - y);
+  const rows = used.map(p => `<tr><th>${p}</th>${used.map(e => {
+    const n = grid[p - 1][e - 1], near = Math.abs(p - e) <= 1;
+    return `<td style="background:${n ? mix('#2a2a2a', near ? '#2e9d4a' : '#d9342b', 0.25 + 0.75 * n / max) : '#222'}">${n || ''}</td>`;
+  }).join('')}</tr>`).join('');
+  document.getElementById('acc').innerHTML = `<h2>Estimated vs. rated PASER</h2>
+    <div class="note">Fitted on Sep 27-30 drives, scored on Oct 1 drives.<br>
+    Within one grade on <b>${Math.round(a.within1 * 100)}%</b> of ${a.sections} half-mile sections
+    (MAE ${a.mae}). Always guessing ${a.guess}: ${Math.round(a.guess_within1 * 100)}% (MAE ${a.guess_mae}).</div>
+    <table class="cm"><tr><th></th>${used.map(e => `<th>${e}</th>`).join('')}</tr>${rows}</table>
+    <div class="note">Rows: rated. Columns: estimated.</div>`;
 }
 
 async function show(id, animate) {
   clearInterval(timer);
   if (driveLayer) driveLayer.remove();
-  const d = await (await fetch(`data/out/${id}.json`)).json();
+  const mode = document.getElementById('mode').value;
+  document.getElementById('legend').innerHTML = legends[mode];
+  const d = await json(`data/out/${id}.json`);
   driveLayer = L.layerGroup().addTo(map);
   L.polyline(d.track.map(p => [p[0], p[1]]), { color: '#666', weight: 2 }).addTo(driveLayer);
-  map.fitBounds(d.track.map(p => [p[0], p[1]]), { padding: [40, 40] });
+  if (!animate) map.fitBounds(d.track.map(p => [p[0], p[1]]), { padding: [40, 40] });
 
-  const wins = d.windows.map(w => ({ w, line: L.polyline(w.path, { color: roughColor(w.rough), weight: 6 })
-    .bindPopup(`<b>${w.name ?? 'Unrated road'}</b>${w.paser ? ` (PASER ${w.paser})` : ''}<br>
-      roughness ${w.rough} m/s² vertical, ${w.rough_lat} lateral<br>${(w.speed * 2.237).toFixed(0)} mph`) }));
-  const marks = d.markers.map(m => ({ t: m[2], m: L.marker([m[0], m[1]],
+  const wins = d.windows.map(w => ({ t: w.t, w, layer: L.polyline(w.path,
+    { color: mode === 'est' ? paserColor(w.est) : roughColor(w.rn), weight: 6 })
+    .bindPopup(`<b>${w.name ? esc(w.name) : 'Unrated road'}</b><br>Estimated PASER <b>${w.est}</b>${w.paser ? `, rated ${w.paser}` : ''}<br>
+      roughness ${w.rn} m/s² (normalized to 45 mph)<br>${(w.speed * 2.237).toFixed(0)} mph`) }));
+  const hits = d.hits.map(h => ({ t: h.t, layer: L.circleMarker([h.lat, h.lon],
+    { radius: 3 + Math.min(h.severity, 20) / 3, color: '#111', weight: 1, fillColor: '#fff', fillOpacity: 0.9 })
+    .bindPopup(`<b>Severe hit</b><br>severity ${h.severity} m/s²<br>vertical ${h.vert}, lateral ${h.lat_g} m/s²<br>
+      ${(h.speed * 2.237).toFixed(0)} mph`) }));
+  const marks = d.markers.map(m => ({ t: m[2], layer: L.marker([m[0], m[1]],
     { icon: L.divIcon({ className: '', html: '<div class="mark"></div>', iconSize: [12, 12] }) })
     .bindPopup('Calibration mark') }));
 
@@ -91,16 +138,12 @@ async function show(id, animate) {
     { icon: L.divIcon({ className: '', html: '<div class="car"></div>', iconSize: [14, 14] }) });
 
   function render(t) {
-    let km = 0, unrated = 0;
-    for (const { w, line } of wins) {
-      if (w.t > t) { line.remove(); continue; }
-      line.addTo(driveLayer);
-      km += 0.05; if (w.seg < 0) unrated += 0.05;
-    }
-    for (const { t: mt, m } of marks) mt <= t ? m.addTo(driveLayer) : m.remove();
+    for (const x of [...wins, ...hits, ...marks]) x.t <= t ? x.layer.addTo(driveLayer) : x.layer.remove();
+    const seen = wins.filter(x => x.t <= t);
+    const km = seen.length * 0.05, unrated = seen.filter(x => x.w.seg < 0).length * 0.05;
     document.getElementById('stats').innerHTML =
-      `<b>${km.toFixed(1)} km</b> measured<br><b>${unrated.toFixed(1)} km</b> on unrated roads<br>` +
-      `<b>${marks.filter(x => x.t <= t).length}</b> calibration marks`;
+      `<b>${km.toFixed(1)} km</b> measured, <b>${unrated.toFixed(1)} km</b> unrated<br>` +
+      `<b>${hits.filter(x => x.t <= t).length}</b> severe hits, <b>${marks.filter(x => x.t <= t).length}</b> calibration marks`;
   }
 
   if (!animate) return render(Infinity);

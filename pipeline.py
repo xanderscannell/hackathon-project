@@ -1,12 +1,16 @@
 """Turn logged drives into map-ready JSON.
 
     python pipeline.py              # every drive in data/raw/drives -> data/out/
-    python pipeline.py --selftest   # check the snapping math
+    python pipeline.py --selftest   # check the snapping and hit math
 
 Per drive: GPS is interpolated onto the 100 Hz IMU timeline, the moving part
-of the drive is cut into fixed-distance windows, each window gets a raw
-roughness value and is snapped to the nearest SEMCOG PASER segment running
-the same direction.
+of the drive is cut into fixed-distance windows, each window gets a
+speed-normalized roughness and is snapped to the nearest SEMCOG PASER segment
+running the same direction, and severe hits are picked out of the raw signal.
+
+Across drives: windows on rated roads are grouped into half-mile sections,
+roughness is mapped to an estimated PASER grade with one line fitted on the
+earlier drives, and the fit is scored on the later drives.
 """
 import json
 import sys
@@ -21,6 +25,14 @@ WINDOW_M = 50          # roughness window length along the road
 MIN_SPEED = 3.0        # m/s; below this the vehicle counts as stopped
 SNAP_M = 20            # max distance from a window to a PASER segment
 SNAP_DEG = 35          # max heading difference between window and segment
+SPEED_EXP = 0.31       # roughness ~ speed^0.31, fitted within segments across passes
+REF_SPEED = 20         # m/s; roughness is reported as if driven at this speed
+HIT_MS2 = 4.5          # severe hit: speed-normalized peak above this...
+HIT_RATIO = 3          # ...and this many times the surrounding road's level
+SECTION_MI = 0.5       # rated sections are this long along a road
+TEST_PREFIX = "drive_202610"  # drives scored, never fitted on
+# Rated before a rebuild; their ratings would teach the fit the wrong answer.
+STALE = {"Evergreen Rd"}  # ponytail: whole road by name; the rebuilt stretch only, if other parts matter
 LAT0, LON0 = 42.2, -83.3
 KX = np.cos(np.radians(LAT0)) * 111_320
 KY = 110_540
@@ -42,6 +54,7 @@ def load_segments():
             "paser": p["AS_OF_24"],
             "evalyear": p["EVALYEAR"],
             "surface": p["SURFACE"],
+            "section": f"{p['PR']}|{p['AS_OF_24']}|{int(p['BMP'] // SECTION_MI)}",
             "coords": [[round(lat, 5), round(lon, 5)] for lon, lat in coords],
         })
         x, y = to_xy(coords[:, 1], coords[:, 0])
@@ -69,11 +82,30 @@ def snap(px, py, bearing, pieces):
     return out
 
 
+def speed_norm(x, speed):
+    return x * (REF_SPEED / np.maximum(speed, MIN_SPEED)) ** SPEED_EXP
+
+
+def find_hits(t, speed, mag):
+    """Start index of each severe hit. mag is high-passed vertical+lateral acceleration.
+    A hit stands out from the surrounding ~5 s of road, lasts at least 3 samples
+    within 0.1 s (a lone sample is never a hit), and only counts while moving.
+    Samples less than 1 s apart belong to the same hit."""
+    background = pd.Series(mag).rolling(500, center=True, min_periods=1).median().to_numpy()
+    cand = (speed >= MIN_SPEED) & (speed_norm(mag, speed) > HIT_MS2) & (mag > HIT_RATIO * background)
+    dense = pd.Series(cand.astype(int)).rolling(10, center=True, min_periods=1).sum().to_numpy() >= 3
+    starts = []
+    for i in np.flatnonzero(cand & dense):
+        if not starts or t[i] - t[starts[-1]] > 1000:
+            starts.append(i)
+    return starts
+
+
 def process(stem, segs, pieces):
     imu = pd.read_csv(RAW / "drives" / f"{stem}_imu.csv")
     gps = pd.read_csv(RAW / "drives" / f"{stem}_gps.csv").dropna(subset=["lat", "lon"])
-    marks = pd.read_csv(RAW / "drives" / f"{stem}_markers.csv")
     gps = gps.sort_values("t_ms")
+    mt = pd.read_csv(RAW / "drives" / f"{stem}_markers.csv").t_ms.to_numpy(float)
 
     t = imu.t_ms.to_numpy(float)
     lat = np.interp(t, gps.t_ms, gps.lat)
@@ -83,11 +115,12 @@ def process(stem, segs, pieces):
     dt = np.clip(np.diff(imu.seq.to_numpy(), prepend=imu.seq.iloc[0]), 0, 10) * 0.01
     dist = np.cumsum(speed * dt)
 
-    # high-pass: remove slow body motion with a 1 s rolling mean
+    # high-pass: remove slow body motion and steady cornering with a 1 s rolling mean
     def hp(col):
         s = imu[col]
         return (s - s.rolling(100, center=True, min_periods=1).mean()).to_numpy()
     vert, lat_acc = hp("vert"), hp("lat")
+    mag = np.hypot(vert, lat_acc)
 
     moving = speed >= MIN_SPEED
     win = (dist // WINDOW_M).astype(int)
@@ -99,12 +132,15 @@ def process(stem, segs, pieces):
         x, y = to_xy(lat[idx], lon[idx])
         bearing = np.degrees(np.arctan2(x[-1] - x[0], y[-1] - y[0]))
         step = max(1, len(idx) // 8)
+        rough = float(np.sqrt(np.mean(vert[idx] ** 2)))
+        v = float(speed[idx].mean())
         windows.append({
             "t": round(t[idx[0]] / 1000, 2),
             "path": [[round(a, 6), round(b, 6)] for a, b in zip(lat[idx][::step], lon[idx][::step])],
-            "rough": round(float(np.sqrt(np.mean(vert[idx] ** 2))), 3),
+            "rough": round(rough, 3),
             "rough_lat": round(float(np.sqrt(np.mean(lat_acc[idx] ** 2))), 3),
-            "speed": round(float(speed[idx].mean()), 1),
+            "rn": round(float(speed_norm(rough, v)), 3),
+            "speed": round(v, 1),
             "_xy": (x.mean(), y.mean(), bearing),
         })
 
@@ -115,37 +151,117 @@ def process(stem, segs, pieces):
             w["paser"] = segs[s]["paser"] if s >= 0 else None
             w["name"] = segs[s]["name"] if s >= 0 else None
 
+    hits = []
+    for i in find_hits(t, speed, mag):
+        j = slice(i, i + 100)  # the hit's first second
+        hits.append({
+            "t": round(t[i] / 1000, 2),
+            "lat": round(lat[i], 6), "lon": round(lon[i], 6),
+            "severity": round(float(speed_norm(mag[j].max(), speed[i])), 1),
+            "vert": round(float(np.abs(vert[j]).max()), 1),
+            "lat_g": round(float(np.abs(lat_acc[j]).max()), 1),
+            "speed": round(float(speed[i]), 1),
+        })
+
     one_hz = slice(None, None, 100)
-    mt = marks.t_ms.to_numpy(float)
     return {
         "id": stem,
         "track": [[round(a, 6), round(b, 6), round(c / 1000, 2)]
                   for a, b, c in zip(lat[one_hz], lon[one_hz], t[one_hz])],
         "windows": windows,
+        "hits": hits,
         "markers": [[round(a, 6), round(b, 6), round(c / 1000, 2)]
                     for a, b, c in zip(np.interp(mt, gps.t_ms, gps.lat),
                                        np.interp(mt, gps.t_ms, gps.lon), mt)],
     }
 
 
+def fit_paser(rn, paser, n):
+    """One line: PASER = a + b * ln(roughness), weighted by windows per section."""
+    b, a = np.polyfit(np.log(rn), paser, 1, w=np.sqrt(n))
+    return a, b
+
+
+def estimate(rn, a, b):
+    return np.clip(np.round(a + b * np.log(rn)), 1, 10).astype(int)
+
+
+def sections_table(drives, segs):
+    rows = [(d["id"], segs[w["seg"]]["section"], w["seg"], w["rn"], w["paser"])
+            for d in drives for w in d["windows"]
+            if w["seg"] >= 0 and segs[w["seg"]]["name"] not in STALE]
+    return pd.DataFrame(rows, columns=["drive", "section", "seg", "rn", "paser"])
+
+
+def summarize(df):
+    g = df.groupby("section")
+    s = g.agg(rn=("rn", "median"), paser=("paser", "first"), n=("rn", "size"),
+              passes=("drive", "nunique"))
+    return s[s.n >= 4]  # under 200 m of road in total is too little to rate
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     segs, pieces = load_segments()
-    (OUT / "segments.json").write_text(json.dumps(segs, separators=(",", ":")))
-    drives, all_rough = [], []
+    drives = []
     for f in sorted((RAW / "drives").glob("*_imu.csv")):
-        stem = f.name.removesuffix("_imu.csv")
-        d = process(stem, segs, pieces)
-        (OUT / f"{stem}.json").write_text(json.dumps(d, separators=(",", ":")))
-        rough = [w["rough"] for w in d["windows"]]
-        all_rough += rough
+        d = process(f.name.removesuffix("_imu.csv"), segs, pieces)
+        drives.append(d)
+
+    # fit on the earlier drives, score on the later ones
+    df = sections_table(drives, segs)
+    test = df.drive.str.startswith(TEST_PREFIX)
+    train_s, test_s = summarize(df[~test]), summarize(df[test])
+    a, b = fit_paser(train_s.rn, train_s.paser, train_s.n)
+    err = np.abs(estimate(test_s.rn, a, b) - test_s.paser)
+    guess = round(np.average(train_s.paser, weights=train_s.n))
+    guess_err = np.abs(guess - test_s.paser)
+    est_test = estimate(test_s.rn, a, b)
+    accuracy = {
+        "sections": len(test_s),
+        "within1": round(float((err <= 1).mean()), 3),
+        "exact": round(float((err == 0).mean()), 3),
+        "mae": round(float(err.mean()), 2),
+        "guess": int(guess),
+        "guess_within1": round(float((guess_err <= 1).mean()), 3),
+        "guess_mae": round(float(guess_err.mean()), 2),
+        "corr": round(float(np.corrcoef(np.log(test_s.rn), test_s.paser)[0, 1]), 2),
+        "pairs": [[int(p), int(e)] for p, e in zip(test_s.paser, est_test)],
+        "fit": [round(a, 3), round(b, 3)],
+    }
+
+    # every window gets an estimate, rated road or not
+    for d in drives:
+        for w in d["windows"]:
+            w["est"] = int(estimate(w["rn"], a, b))
+
+    # sections for the map: all passes pooled
+    all_s = summarize(df)
+    segs_by_section = df.groupby("section").seg.unique()
+    sections = [{
+        "name": segs[segs_by_section[k][0]]["name"],
+        "paser": int(r.paser), "est": int(estimate(r.rn, a, b)),
+        "rn": round(float(r.rn), 3), "n": int(r.n), "passes": int(r.passes),
+        "coords": [segs[s]["coords"] for s in segs_by_section[k]],
+    } for k, r in all_s.iterrows()]
+
+    for d in drives:
+        (OUT / f"{d['id']}.json").write_text(json.dumps(d, separators=(",", ":")))
         snapped = sum(w["seg"] >= 0 for w in d["windows"])
-        print(f"{stem}: {len(d['windows'])} windows, {snapped} on rated segments, "
-              f"{len(d['markers'])} marks")
-        drives.append(stem)
-    q = np.percentile(all_rough, [10, 50, 90]).round(3).tolist()
-    (OUT / "index.json").write_text(json.dumps({"drives": drives, "rough_pct": q}))
-    print("roughness p10/p50/p90:", q)
+        print(f"{d['id']}: {len(d['windows'])} windows, {snapped} on rated segments, "
+              f"{len(d['hits'])} hits, {len(d['markers'])} marks")
+    (OUT / "segments.json").write_text(json.dumps(segs, separators=(",", ":")))
+    (OUT / "sections.json").write_text(json.dumps(sections, separators=(",", ":")))
+    rn_all = [w["rn"] for d in drives for w in d["windows"]]
+    (OUT / "index.json").write_text(json.dumps({
+        "drives": [d["id"] for d in drives],
+        "rough_pct": np.percentile(rn_all, [10, 50, 90]).round(3).tolist(),
+        "accuracy": accuracy,
+    }))
+    print(f"fit PASER = {a:.2f} {b:+.2f} ln(roughness) on {len(train_s)} sections")
+    print(f"test: {accuracy['sections']} sections, within one grade {accuracy['within1']:.0%}, "
+          f"MAE {accuracy['mae']}; always guessing {guess}: {accuracy['guess_within1']:.0%}, "
+          f"MAE {accuracy['guess_mae']}")
 
 
 def selftest():
@@ -156,6 +272,15 @@ def selftest():
     assert snap(px, py, bearing, pieces).tolist() == [7, 7, -1, -1]
     x, y = to_xy([LAT0 + 0.001], [LON0])
     assert abs(y[0] - 110.54) < 0.01 and abs(x[0]) < 1e-9
+
+    # 20 s of quiet road at 20 m/s with one 5-sample bump and one lone spike
+    t = np.arange(2000) * 10.0
+    speed = np.full(2000, 20.0)
+    mag = np.full(2000, 0.5)
+    mag[800:805] = 8.0   # real hit
+    mag[1500] = 30.0     # lone corrupted sample: never a hit
+    assert find_hits(t, speed, mag) == [800]
+    assert find_hits(t, np.zeros(2000), mag) == []  # parked: nothing counts
     print("selftest ok")
 
 
