@@ -3,85 +3,202 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Road Condition Map</title>
+<title>Road Condition</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
-  :root { --bg: #111; --panel: #1c1c1c; --fg: #eee; --muted: #999; --accent: #f28c28; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px system-ui, sans-serif; }
-  #map { position: absolute; inset: 0; background: var(--bg); }
-  .dark-tiles { filter: invert(1) hue-rotate(180deg) brightness(0.7) contrast(0.9); }
-  .card { position: absolute; z-index: 1000; background: var(--panel); padding: 12px 14px;
-          border-radius: 8px; box-shadow: 0 2px 12px #0008; }
-  #panel { top: 12px; left: 12px; min-width: 250px; }
-  #acc { bottom: 24px; left: 12px; max-width: 300px; }
-  #rank { top: 120px; right: 12px; width: 300px; max-height: calc(100% - 170px); overflow-y: auto; }
-  #rank ol { margin: 0; padding: 0; list-style: none; }
-  #rank li { padding: 6px 4px; border-top: 1px solid #333; cursor: pointer; line-height: 1.35; }
-  #rank li:hover { background: #262626; }
-  .pill { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 8px; color: #111; font-weight: 600; }
-  .clock { height: 4px; background: #333; border-radius: 2px; margin-top: 3px; }
-  .clock div { height: 100%; border-radius: 2px; background: var(--accent); }
-  .modal { display: none; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100% - 32px));
-           max-height: 80%; overflow-y: auto; z-index: 1100; }
-  .modal p { line-height: 1.5; }
-  .modal ul { padding-left: 18px; margin: 4px 0; }
-  .ghost { background: #2a2a2a; color: var(--fg); border: 1px solid #444; font-weight: 400; }
-  a { color: var(--accent); }
-  h1 { font-size: 15px; margin: 0 0 8px; }
-  h2 { font-size: 13px; margin: 0 0 6px; }
-  select, button { font: inherit; background: #2a2a2a; color: var(--fg); border: 1px solid #444;
-                   border-radius: 4px; padding: 4px 8px; }
-  button { background: var(--accent); color: #111; border: 0; font-weight: 600; cursor: pointer; }
-  .row { display: flex; gap: 8px; margin-bottom: 8px; }
-  .stat, .note { color: var(--muted); line-height: 1.6; }
-  .note { font-size: 12px; line-height: 1.4; margin-top: 6px; }
-  .stat b, .note b { color: var(--fg); }
-  .legend { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; margin-top: 6px; }
-  .ramp { flex: 1; height: 8px; border-radius: 4px; }
-  .mark { width: 12px; height: 12px; background: var(--accent); transform: rotate(45deg); border: 2px solid #111; }
-  .car { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 3px solid var(--accent); }
-  table.cm { border-collapse: collapse; font-size: 11px; margin-top: 6px; }
-  .cm td, .cm th { width: 20px; height: 18px; text-align: center; padding: 0; color: var(--fg); }
-  .cm th { color: var(--muted); font-weight: 400; }
-  #acc { max-height: calc(100% - 300px); overflow-y: auto; max-width: 340px; }
-  table.models { border-collapse: collapse; font-size: 12px; width: 100%; }
-  .models td, .models th { padding: 2px 4px; text-align: right; }
-  .models td:first-child { text-align: left; }
-  .models th { color: var(--muted); font-weight: 400; }
+  /* Michigan road signage: each color has one job */
+  :root {
+    --asphalt: #24272b;   /* surfaces */
+    --shoulder: #33373c;  /* raised rows, inputs */
+    --seam: #43474d;      /* dividers */
+    --paint: #eeede7;     /* text */
+    --faded: #a3a49f;     /* secondary text */
+    --work: #f47b20;      /* actions and the 30-day clock only */
+    --blade: #0f6b4a;     /* street-name blades: road names only */
+    --good: #3fa35b; --fair: #edbe2e; --poor: #de4a3c;  /* PASER, Michigan grouping */
+    --side: 400px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--asphalt); color: var(--paint);
+    font: 15px/1.45 Overpass, "Highway Gothic", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+  body { display: grid; grid-template-columns: var(--side) 1fr; }
+  h1, h2, p { margin: 0; }
+  button, select, input { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--work); outline-offset: 2px; }
+  a { color: var(--work); }
+
+  /* sidebar */
+  #side { display: flex; flex-direction: column; min-height: 0; height: 100vh; border-right: 1px solid var(--seam); }
+  .brand { display: flex; gap: 14px; align-items: center; padding: 20px 22px 14px; }
+  .brand h1 { font-size: 26px; font-weight: 800; line-height: 1; letter-spacing: -0.01em; }
+  .brand p { color: var(--faded); font-size: 13px; margin-top: 4px; }
+  nav { display: flex; gap: 2px; padding: 0 14px; border-bottom: 1px solid var(--seam); overflow-x: auto; }
+  nav button { background: none; border: 0; padding: 10px 8px 8px; color: var(--faded); font-weight: 600;
+    border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; }
+  nav button[aria-selected="true"] { color: var(--paint); border-bottom-color: var(--work); }
+  nav button:hover { color: var(--paint); }
+  .panel { flex: 1; overflow-y: auto; padding: 16px 22px 28px; }
+  .panel[hidden] { display: none; }
+  .panel > * + * { margin-top: 14px; }
+  .panel h2 { font-size: 19px; font-weight: 800; line-height: 1.2; }
+  .lede { color: var(--faded); max-width: 60ch; }
+  .lede b { color: var(--paint); font-weight: 600; }
+  .small { font-size: 13px; color: var(--faded); }
+
+  /* repair list: the street blades */
+  .list { list-style: none; padding: 0; margin: 0; }
+  .list li + li { border-top: 1px solid var(--seam); }
+  .row { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; width: 100%;
+    padding: 12px 6px; background: none; border: 0; text-align: left; cursor: pointer; }
+  .row:hover { background: var(--shoulder); }
+  .blade { justify-self: start; background: var(--blade); color: #fff; font-weight: 600; font-size: 15px;
+    padding: 3px 9px 1px; border-radius: 4px; box-shadow: inset 0 0 0 1.5px #fff; max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .blade.unrated { background: var(--shoulder); }
+  .big { grid-row: span 2; text-align: right; font-size: 26px; font-weight: 800; line-height: 1; }
+  .big small { display: block; font-size: 12px; font-weight: 400; color: var(--faded); margin-top: 3px; }
+  .clock { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--faded); }
+  .clock span:first-child { flex: 1; height: 6px; background: var(--shoulder); border-radius: 3px; overflow: hidden; }
+  .clock i { display: block; height: 100%; background: var(--work); }
+  .flag { font-size: 13px; font-weight: 600; }
+  .flag.Worsening { color: var(--poor); }
+
+  /* controls */
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; }
+  select { background: var(--shoulder); border: 1px solid var(--seam); border-radius: 4px; padding: 7px 10px 5px; flex: 1; min-width: 0; }
+  .go { background: var(--work); color: #1b1b1b; border: 0; border-radius: 4px; padding: 7px 16px 5px; font-weight: 800; cursor: pointer; }
+  .seg { display: inline-flex; border: 1px solid var(--seam); border-radius: 4px; overflow: hidden; }
+  .seg button { background: none; border: 0; padding: 6px 12px 4px; color: var(--faded); cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--shoulder); color: var(--paint); }
+  label.check { display: flex; gap: 8px; align-items: center; color: var(--faded); font-size: 13px; cursor: pointer; }
+  dl.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; margin-bottom: 0; }
+  dl.stats dd { margin: 0; font-size: 26px; font-weight: 800; line-height: 1; }
+  dl.stats dt { font-size: 13px; color: var(--faded); margin-top: 4px; }
+  dl.stats div { display: flex; flex-direction: column-reverse; }
+
+  /* tables and charts */
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { color: var(--faded); font-weight: 400; text-align: right; padding: 4px 6px; }
+  td { text-align: right; padding: 5px 6px; border-top: 1px solid var(--seam); }
+  th:first-child, td:first-child { text-align: left; padding-left: 0; }
+  tr.best td { color: var(--paint); font-weight: 600; }
+  tr:not(.best) td { color: var(--faded); }
+  table.cm { width: auto; }
+  .cm td, .cm th { width: 26px; height: 24px; padding: 0; text-align: center; border: 0; color: var(--paint); font-size: 12px; }
+  .bars > div { display: grid; grid-template-columns: 1fr 52px; gap: 4px 10px; align-items: center; }
+  .bars > div + div { margin-top: 10px; }
+  .bars p { grid-column: span 2; font-size: 13px; color: var(--faded); }
+  .bars span { height: 14px; background: var(--shoulder); border-radius: 2px; overflow: hidden; }
+  .bars i { display: block; height: 100%; }
+  .bars b { font-size: 19px; font-weight: 800; text-align: right; }
+  .brief { font-size: 17px; line-height: 1.6; max-width: 60ch; }
+  ul.record { padding-left: 18px; margin: 0; color: var(--faded); font-size: 13px; }
+  ul.record li + li { margin-top: 4px; }
+
+  /* map */
+  #map { height: 100vh; background: var(--asphalt); }
+  .dark-tiles { filter: invert(1) hue-rotate(180deg) brightness(0.62) contrast(0.92) saturate(0.35); }
+  #legend { position: fixed; left: calc(var(--side) + 16px); bottom: 20px; z-index: 900; background: rgb(36 39 43 / 0.94);
+    border: 1px solid var(--seam); border-radius: 4px; padding: 10px 12px; font-size: 13px; color: var(--faded);
+    max-width: min(440px, calc(100vw - var(--side) - 120px)); }
+  #legend .key { display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: center; }
+  #legend .key > span:first-child:not(.sw) { flex-basis: 100%; }
+  #legend .key + .key, #legend .key + label, #legend label + .key { margin-top: 8px; }
+  #legend .indent { padding-left: 24px; margin-top: 4px; }
+  input[type="checkbox"] { accent-color: var(--work); width: 15px; height: 15px; margin: 0; }
+  .panel, nav { scrollbar-width: thin; scrollbar-color: var(--seam) transparent; }
+  .sw { display: inline-flex; gap: 6px; align-items: center; }
+  .sw i { display: inline-block; width: 18px; height: 4px; border-radius: 2px; }
+  .sw i.dot { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid #1b1b1b; }
+  .ramp { display: flex; gap: 8px; align-items: center; }
+  .ramp i { width: 120px; height: 8px; border-radius: 4px; }
+  .mark { width: 11px; height: 11px; background: var(--work); transform: rotate(45deg); border: 1.5px solid #1b1b1b; }
+  .car { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 3px solid var(--work); }
+  .leaflet-container { font: 13px/1.45 Overpass, system-ui, sans-serif; background: var(--asphalt); }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--shoulder); color: var(--paint); border-radius: 4px; }
+  .leaflet-popup-content { margin: 12px 14px; }
+  .leaflet-popup-content b { font-weight: 600; }
+  .leaflet-popup-content .blade { font-size: 14px; display: inline-block; margin-bottom: 6px; }
+  .leaflet-container a.leaflet-popup-close-button { color: var(--faded); }
+  .leaflet-control-zoom a { background: var(--shoulder); color: var(--paint); border-color: var(--seam); }
+  .leaflet-control-attribution { background: rgb(36 39 43 / 0.8) !important; color: var(--faded); }
+  .leaflet-control-attribution a { color: var(--faded); }
+
+  @media (max-width: 820px) {
+    body { grid-template-columns: 1fr; grid-template-rows: 52vh 1fr; }
+    #map { height: 52vh; grid-row: 1; }
+    #side { grid-row: 2; height: auto; min-height: 48vh; border-right: 0; border-top: 1px solid var(--seam); }
+    #legend { left: 16px; bottom: auto; top: calc(52vh - 16px); transform: translateY(-100%); }
+    .brand { padding: 14px 16px 10px; }
+    .panel { padding: 14px 16px 24px; }
+  }
 </style>
 </head>
 <body>
-<div id="map"></div>
-<div id="panel" class="card">
-  <h1>Road Condition Map</h1>
-  <div class="row"><select id="drive"></select><button id="play">Replay</button></div>
-  <div class="row"><select id="mode"><option value="est">Estimated PASER</option><option value="rough">Roughness</option></select>
-    <button id="briefBtn" class="ghost" hidden>Weekly brief</button>
-    <button id="forecastBtn" class="ghost" hidden>Forecast</button></div>
-  <div class="stat" id="stats"></div>
-  <div class="legend" id="legend"></div>
-</div>
-<div id="acc" class="card"></div>
-<div id="rank" class="card"></div>
-<div id="brief" class="card modal"></div>
-<div id="forecast" class="card modal"></div>
+<aside id="side">
+  <header class="brand">
+    <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+      <rect x="7" y="7" width="30" height="30" rx="3" transform="rotate(45 22 22)" fill="#f47b20"/>
+      <rect x="9.5" y="9.5" width="25" height="25" rx="2" transform="rotate(45 22 22)" fill="none" stroke="#1b1b1b" stroke-width="1.6"/>
+      <path d="M12 25 h6 q4 6 8 0 h6" fill="none" stroke="#1b1b1b" stroke-width="2.6" stroke-linecap="round"/>
+    </svg>
+    <div><h1>Road Condition</h1><p id="asof">Loading measured roads</p></div>
+  </header>
+  <nav role="tablist" aria-label="Views">
+    <button role="tab" id="t-repairs" aria-controls="repairs" aria-selected="true">Repairs</button>
+    <button role="tab" id="t-drives" aria-controls="drives" aria-selected="false">Drives</button>
+    <button role="tab" id="t-forecast" aria-controls="forecast" aria-selected="false" hidden>Forecast</button>
+    <button role="tab" id="t-brief" aria-controls="brief" aria-selected="false" hidden>Brief</button>
+    <button role="tab" id="t-accuracy" aria-controls="accuracy" aria-selected="false">Accuracy</button>
+  </nav>
+  <section class="panel" id="repairs" role="tabpanel" aria-labelledby="t-repairs"></section>
+  <section class="panel" id="drives" role="tabpanel" aria-labelledby="t-drives" hidden>
+    <div class="controls">
+      <select id="drive" aria-label="Drive"></select>
+      <button class="go" id="play">Replay drive</button>
+    </div>
+    <div class="seg" role="group" aria-label="Color the road by">
+      <button id="m-est" aria-pressed="true">Estimated PASER</button>
+      <button id="m-rough" aria-pressed="false">Roughness</button>
+    </div>
+    <dl class="stats" id="stats"></dl>
+    <p class="small">Each stretch is 50 m of road. Severe hits are single jolts that stand out from the road around them;
+      calibration marks are spots the driver flagged as definite defects.</p>
+  </section>
+  <section class="panel" id="forecast" role="tabpanel" aria-labelledby="t-forecast" hidden></section>
+  <section class="panel" id="brief" role="tabpanel" aria-labelledby="t-brief" hidden></section>
+  <section class="panel" id="accuracy" role="tabpanel" aria-labelledby="t-accuracy" hidden></section>
+</aside>
+<div id="map" role="region" aria-label="Map"></div>
+<div id="legend"></div>
 <div id="chat"></div>
 <script>
-const map = L.map('map', { preferCanvas: true }).setView([42.2, -83.3], 11);
+const map = L.map('map', { preferCanvas: true, zoomControl: false }).setView([42.2, -83.3], 11);
+L.control.zoom({ position: 'topright' }).addTo(map);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap', maxZoom: 19, className: 'dark-tiles' }).addTo(map);
 
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const C = { good: css('--good'), fair: css('--fair'), poor: css('--poor'), work: css('--work'),
+  shoulder: css('--shoulder'), seam: css('--seam'), paint: css('--paint') };
 // Michigan's grouping: 8-10 good, 5-7 fair, 1-4 poor
-const paserColor = p => p >= 8 ? '#2e9d4a' : p >= 5 ? '#e5b100' : '#d9342b';
-const ramp = ['#3a7bd5', '#f5f5f5', '#f28c28', '#e0245e'];
-const legends = {
-  rough: `smooth <div class="ramp" style="background:linear-gradient(90deg,${ramp})"></div> rough`,
-  est: `<div class="ramp" style="background:linear-gradient(90deg,#d9342b 0 33%,#e5b100 33% 66%,#2e9d4a 66%)"></div>
-        <span>poor · fair · good</span>`,
-};
+const paserColor = p => p >= 8 ? C.good : p >= 5 ? C.fair : C.poor;
+const ramp = ['#5d6f80', '#eeede7', '#f47b20', '#de4a3c'];  // roughness: smooth to rough
+const stateColor = { Suspected: '#8c8f93', Confirmed: C.work, Worsening: C.poor, Repaired: C.good, PatchFailed: '#b071d9' };
+const stateName = { Suspected: 'one pass', Confirmed: 'confirmed', Worsening: 'getting worse', Repaired: 'repaired', PatchFailed: 'patch failed' };
 const esc = s => String(s).replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
-let pct, driveLayer, timer;
+const pct = x => `${Math.round(x * 100)}%`;
+const fmtDate = s => new Date(s + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+const blade = (name, extra = '') => `<span class="blade${name ? '' : ' unrated'}${extra}">${name ? esc(name) : 'Unrated road'}</span>`;
+const json = url => fetch(url).then(r => r.ok ? r.json() : null).catch(() => null);
+const MI = 1609.34;
+let roughPct, PH, view = 'repairs', mode = 'est', driveLayer, timer;
+// SEMCOG's lines use the same colors as a drive's estimate, so they start hidden there
+const showRatings = { repairs: true, drives: false, brief: true, accuracy: true };
 
 function mix(a, b, f) {
   const n = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
@@ -89,214 +206,196 @@ function mix(a, b, f) {
   return `rgb(${x.map((v, i) => Math.round(v + (y[i] - v) * f))})`;
 }
 function roughColor(r) {
-  const [lo, , hi] = pct;
+  const [lo, , hi] = roughPct;
   const f = Math.min(Math.max((r - lo) / (hi - lo), 0), 1) * (ramp.length - 1);
   const i = Math.min(Math.floor(f), ramp.length - 2);
   return mix(ramp[i], ramp[i + 1], f - i);
 }
-const json = async url => (await fetch(url)).json();
+function driveName(id) {
+  const [, d, t] = id.split('_');
+  const when = new Date(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6), +t.slice(0, 2), +t.slice(2, 4));
+  return when.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+// each tab is a view of the map: it owns which layers show and what the legend says
+const layers = {}, legends = {};
+function setView(name) {
+  view = name;
+  document.querySelectorAll('nav button').forEach(b => b.setAttribute('aria-selected', b.id === `t-${name}`));
+  document.querySelectorAll('.panel').forEach(p => p.hidden = p.id !== name);
+  const want = new Set({
+    repairs: ['ratings', 'confirmed', ...(document.getElementById('one-pass')?.checked ? ['suspected'] : [])],
+    drives: ['ratings', 'drive'], forecast: ['risk'], brief: ['ratings', 'confirmed'], accuracy: ['ratings', 'estimated'],
+  }[name]);
+  if (!showRatings[name]) want.delete('ratings');
+  for (const [k, l] of Object.entries(layers)) want.has(k) ? l.addTo(map) : l.remove();
+  renderLegend();
+}
+// opening a tab frames that tab's data
+function fitView() {
+  const key = { repairs: 'confirmed', brief: 'confirmed', drives: 'drive', forecast: 'risk', accuracy: 'estimated' }[view];
+  const items = layers[key]?.getLayers() ?? [];
+  if (items.length) map.fitBounds(L.featureGroup(items).getBounds(), { padding: [40, 40] });
+}
+
+function renderLegend() {
+  const ratings = `<label class="check"><input type="checkbox" id="show-ratings" ${showRatings[view] ? 'checked' : ''}>
+    SEMCOG ratings</label>${showRatings[view] ? `<div class="key indent"><span class="sw"><i style="background:${C.good}"></i>good</span>
+    <span class="sw"><i style="background:${C.fair}"></i>fair</span><span class="sw"><i style="background:${C.poor}"></i>poor</span></div>` : ''}`;
+  const body = (legends[view] ?? (() => ''))();
+  document.getElementById('legend').innerHTML = body + (['forecast'].includes(view) ? '' : ratings);
+  const box = document.getElementById('show-ratings');
+  if (box) box.onchange = () => { showRatings[view] = box.checked; setView(view); };
+}
 
 async function init() {
-  const index = await json('data/out/index.json');
-  pct = index.rough_pct;
-  const [segs, sections] = await Promise.all([json('data/out/segments.json'), json('data/out/sections.json')]);
+  const [index, segs, sections, ph, fc, brief, models, chat] = await Promise.all(['index', 'segments', 'sections',
+    'potholes', 'forecast', 'brief', 'models', 'webchat'].map(n => json(`data/out/${n}.json`)));
+  roughPct = index.rough_pct;
+  document.getElementById('asof').textContent = `${index.drives.length} drives, as of ${fmtDate(ph.as_of)}`;
 
-  const paser = L.layerGroup(segs.map(s => L.polyline(s.coords, { color: paserColor(s.paser), weight: 2, opacity: 0.45 })
-    .bindPopup(`<b>${esc(s.name)}</b><br>Rated PASER ${s.paser} (${s.evalyear})<br>${esc(s.surface)}`))).addTo(map);
-  const est = L.layerGroup(sections.map(s => L.polyline(s.coords, { color: paserColor(s.est), weight: 7, opacity: 0.85 })
-    .bindPopup(`<b>${esc(s.name)}</b><br>Estimated PASER <b>${s.est}</b>, rated ${s.paser}<br>
-      ${s.n} windows over ${s.passes} pass${s.passes > 1 ? 'es' : ''}<br>
-      median roughness ${s.rn} m/s² (normalized to 45 mph)`)));
-  const ph = await json('data/out/potholes.json');
-  const [confirmed, suspected] = potholeLayers(ph);
-  const fc = await fetch('data/out/forecast.json').then(r => r.ok ? r.json() : null).catch(() => null);
-  const overlays = { 'Rated PASER (SEMCOG)': paser, 'Estimated PASER by section': est,
-    'Potholes (confirmed)': confirmed, 'Suspected (one pass)': suspected };
-  if (fc) overlays[`Risk of poor by ${fc.forward.to}`] = forecastLayer(fc, segs);
-  L.control.layers(null, overlays, { position: 'topright', collapsed: false }).addTo(map);
+  layers.ratings = L.layerGroup(segs.map(s => L.polyline(s.coords, { color: paserColor(s.paser), weight: 2, opacity: 0.4 })
+    .bindPopup(`${blade(s.name)}<br>Rated PASER <b>${s.paser}</b> by SEMCOG (${s.evalyear}), ${esc(s.surface).toLowerCase()}`)));
+  layers.estimated = L.layerGroup(sections.map(s => L.polyline(s.coords, { color: paserColor(s.est), weight: 7, opacity: 0.9 })
+    .bindPopup(`${blade(s.name)}<br>Estimated PASER <b>${s.est}</b>, rated ${s.paser}<br>
+      ${s.n} stretches over ${s.passes} pass${s.passes > 1 ? 'es' : ''}`)));
+  legends.accuracy = () => `<div class="key"><span>Estimated PASER by half-mile section</span>
+    <span class="sw"><i style="background:${C.good}"></i>good</span><span class="sw"><i style="background:${C.fair}"></i>fair</span>
+    <span class="sw"><i style="background:${C.poor}"></i>poor</span></div>`;
 
-  renderAccuracy(index.accuracy);
-  const chat = await fetch('data/out/webchat.json').then(r => r.ok ? r.json() : null).catch(() => null);
-  if (chat) loadChat(chat);
-  const models = await fetch('data/out/models.json').then(r => r.ok ? r.json() : null).catch(() => null);
-  if (models) renderModels(models);
-  const brief = await fetch('data/out/brief.json').then(r => r.ok ? r.json() : null).catch(() => null);
+  renderRepairs(ph);
+  renderDrives(index);
+  if (fc) renderForecast(fc, segs);
   if (brief) renderBrief(brief);
-  const sel = document.getElementById('drive'), mode = document.getElementById('mode');
-  sel.innerHTML = index.drives.map(d => `<option>${d}</option>`).join('');
-  sel.onchange = mode.onchange = () => show(sel.value, false);
-  document.getElementById('play').onclick = () => show(sel.value, true);
-  show(index.drives[0], false);
-}
-
-const stateColor = { Suspected: '#888', Confirmed: '#f28c28', Worsening: '#e0245e', Repaired: '#2e9d4a', PatchFailed: '#a259ff' };
-const pill = s => `<span class="pill" style="background:${stateColor[s]}">${s}</span>`;
-const fmtDate = s => new Date(s + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-
-function forecastLayer(fc, segs) {
-  const b = fc.backtest, pct = x => `${Math.round(x * 100)}%`;
-  const riskColor = r => mix('#3a3a3a', '#e0245e', Math.min(r / 0.6, 1));
-  const layer = L.layerGroup(fc.forward.risk.map(([id, r]) => L.polyline(segs[id].coords,
-    { color: riskColor(r), weight: 2 + 4 * Math.min(r / 0.6, 1), opacity: 0.9 })
-    .bindPopup(`<b>${esc(segs[id].name)}</b><br>Rated PASER ${segs[id].paser} now<br>
-      Chance of poor (1-4) by ${fc.forward.to}: <b>${pct(r)}</b>`)));
-  const card = document.getElementById('forecast'), btn = document.getElementById('forecastBtn');
-  card.innerHTML = `<h1>Which roads fall to poor next?</h1>
-    <p>Backtest on SEMCOG's own history: the model saw ratings through ${b.origin} only. Of the ${pct(b.top_share)} of
-    fair and good miles it flagged as most at risk, <b>${pct(b.top_hit)}</b> were rated poor by ${b.target},
-    against ${pct(b.base_rate)} of all fair and good miles.</p>
-    <h2>Forecasting every segment's ${b.target} rating, ${b.miles} miles</h2>
-    <table class="models"><tr><th></th><th>within 1</th><th>MAE</th><th title="ranks roads that fell to poor above those that did not; 0.5 is a coin flip">falls to poor</th></tr>
-    ${b.models.map(m => `<tr title="${esc(m.what)}"><td>${esc(m.name)}</td><td>${pct(m.within1)}</td><td>${m.mae}</td><td>${m.auc_fall}</td></tr>`).join('')}</table>
-    <div class="note">Weighted by miles. Models learned from forecasts made in 2012, 2014 and 2016; none saw a rating after ${b.origin}.
-      The map layer applies the same method from ${fc.forward.from} to ${fc.forward.to}.</div>
-    <button class="ghost" id="forecastClose" style="margin-top:10px">Close</button>`;
-  btn.hidden = false;
-  btn.onclick = () => card.style.display = card.style.display === 'block' ? 'none' : 'block';
-  document.getElementById('forecastClose').onclick = () => card.style.display = 'none';
-  return layer;
-}
-
-let PH;
-function potholeLayers(ph) {
-  PH = ph;
-  ph.potholes.forEach(p => potholesById[p.id] = p);
-  const popup = p => `<b>${p.road ? esc(p.road) : 'Unrated road'}</b>${p.paser ? ` (PASER ${p.paser})` : ''}
-    · <a href="#" onclick="workOrder(${p.id}); return false">Work order</a><br>
-    ${pill(p.state)} severity ${p.severity} m/s², hit on ${p.hit_passes} of ${p.passes} passes<br>
-    First seen ${fmtDate(p.first_seen)}: day ${p.days_open} of ${ph.clock_days}<br>
-    <div class="note">${p.history.map(h => `${fmtDate(h.date)} ${h.hit ? `hit, ${h.severity}` : 'passed, no hit'}`).join('<br>')}</div>`;
-  const layer = list => L.layerGroup(list.map(p => {
-    p.marker = L.circleMarker([p.lat, p.lon], { radius: p.state === 'Suspected' ? 4 : 5 + Math.min(p.severity, 20) / 3,
-      color: '#111', weight: 1.5, fillColor: stateColor[p.state], fillOpacity: 0.95 }).bindPopup(popup(p));
-    return p.marker;
-  }));
-  const conf = ph.potholes.filter(p => p.state !== 'Suspected');
-  const confirmed = layer(conf).addTo(map), suspected = layer(ph.potholes.filter(p => p.state === 'Suspected'));
-
-  // ranked list: severity order; the clock is shown, not used to sort
-  document.getElementById('rank').innerHTML = `<h2>Repair priority</h2>
-    <div class="note">${conf.length} confirmed on 2+ passes, as of ${fmtDate(ph.as_of)}. Day 0 is the first detection.</div>
-    <ol>${conf.slice(0, 25).map((p, i) => `<li data-i="${i}">
-      <b>${i + 1}. ${p.road ? esc(p.road) : 'Unrated road'}</b> ${pill(p.state)}<br>
-      <span class="stat">severity <b>${p.severity}</b> · ${p.hit_passes}/${p.passes} passes · day ${p.days_open} of ${ph.clock_days}</span>
-      <div class="clock"><div style="width:${Math.min(100, 100 * p.days_open / ph.clock_days)}%"></div></div></li>`).join('')}</ol>`;
-  document.querySelectorAll('#rank li').forEach(li => li.onclick = () => {
-    const p = conf[li.dataset.i];
-    map.setView([p.lat, p.lon], 17);
-    p.marker.openPopup();
-  });
-  return [confirmed, suspected];
-}
-
-function renderBrief(b) {
-  const card = document.getElementById('brief'), btn = document.getElementById('briefBtn');
-  card.innerHTML = `<h1>Weekly brief</h1>
-    ${b.brief ? `<p>${esc(b.brief)}</p>` : '<p class="note">No brief passed the number check; the facts below are the record.</p>'}
-    <div class="note">Written by ${esc(b.model)} from the facts below, ${esc(b.generated)}.
-      Checked: every number in it appears in the facts.</div>
-    <h2 style="margin-top:12px">The record (computed, not generated)</h2>
-    <ul class="note">${b.facts.map(f => `<li>${esc(f)}</li>`).join('')}</ul>
-    <button class="ghost" id="briefClose">Close</button>`;
-  btn.hidden = false;
-  btn.onclick = () => card.style.display = card.style.display === 'block' ? 'none' : 'block';
-  document.getElementById('briefClose').onclick = () => card.style.display = 'none';
+  renderAccuracy(index.accuracy, models);
+  if (chat) loadChat(chat);
+  document.querySelectorAll('nav button').forEach(b => b.onclick = () => { setView(b.getAttribute('aria-controls')); fitView(); });
+  // arrow keys move between tabs
+  document.querySelector('nav').onkeydown = e => {
+    const tabs = [...document.querySelectorAll('nav button:not([hidden])')], i = tabs.indexOf(document.activeElement);
+    if (i < 0 || !['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+    const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+    next.focus(); next.click();
+  };
+  setView('repairs');
+  fitView();
 }
 
 const potholesById = {};
+function renderRepairs(ph) {
+  PH = ph;
+  ph.potholes.forEach(p => potholesById[p.id] = p);
+  const popup = p => `${blade(p.road)}<br>
+    <b style="color:${stateColor[p.state]}">${stateName[p.state]}</b>, severity <b>${p.severity}</b>, hit on ${p.hit_passes} of ${p.passes} passes<br>
+    First hit ${fmtDate(p.first_seen)}: day ${p.days_open} of ${ph.clock_days}<br>
+    <span class="small">${p.history.map(h => `${fmtDate(h.date)}: ${h.hit ? `hit, ${h.severity}` : 'no hit'}`).join('<br>')}</span><br>
+    <a href="#" onclick="workOrder(${p.id}); return false">Open work order</a>`;
+  const group = list => L.layerGroup(list.map(p => p.marker = L.circleMarker([p.lat, p.lon], {
+    radius: p.state === 'Suspected' ? 3.5 : 4 + Math.min(p.severity, 20) / 3,
+    color: '#1b1b1b', weight: 1.5, fillColor: stateColor[p.state], fillOpacity: 0.95 }).bindPopup(popup(p))));
+  const conf = ph.potholes.filter(p => p.state !== 'Suspected');
+  const one = ph.potholes.length - conf.length;
+  layers.confirmed = group(conf);
+  layers.suspected = group(ph.potholes.filter(p => p.state === 'Suspected'));
+  legends.repairs = legends.brief = () => `<div class="key">
+    <span class="sw"><i class="dot" style="background:${C.work}"></i>confirmed</span>
+    <span class="sw"><i class="dot" style="background:${C.poor}"></i>getting worse</span>
+    <span class="sw"><i class="dot" style="background:${stateColor.Suspected}"></i>one pass</span></div>
+    <div class="key">Bigger dot, harder hit.</div>`;
+
+  const el = document.getElementById('repairs');
+  el.innerHTML = `<p class="lede"><b>${conf.length} potholes</b> hit on two or more passes, hardest first.
+    The bar counts days since the first hit toward the ${ph.clock_days}-day mark.</p>
+    <label class="check"><input type="checkbox" id="one-pass"> Also show ${one} spots hit only once</label>
+    <ol class="list">${conf.slice(0, 40).map(p => `<li><button class="row" data-id="${p.id}">
+      ${blade(p.road)}
+      <span class="big">${p.severity}<small>severity</small></span>
+      <span class="clock"><span><i style="width:${Math.min(100, 100 * p.days_open / ph.clock_days)}%"></i></span>
+        day ${p.days_open} of ${ph.clock_days}${p.state !== 'Confirmed' ? ` <span class="flag ${p.state}">${stateName[p.state]}</span>` : ''}</span>
+    </button></li>`).join('')}</ol>
+    ${conf.length > 40 ? `<p class="small">The other ${conf.length - 40} are on the map.</p>` : ''}`;
+  el.querySelector('#one-pass').onchange = () => setView('repairs');
+  el.querySelectorAll('.row').forEach(b => b.onclick = () => {
+    const p = potholesById[b.dataset.id];
+    map.setView([p.lat, p.lon], 17);
+    p.marker.openPopup();
+  });
+}
+
 function workOrder(id) {
   const p = potholesById[id];
   const dir = ['northbound', 'eastbound', 'southbound', 'westbound'][Math.round(p.heading / 90) % 4];
   const left = PH.clock_days - p.days_open;
   const html = `<!doctype html><meta charset="utf-8"><title>Work order WO-${p.id}</title>
-    <style>body{font:14px system-ui,sans-serif;max-width:640px;margin:32px auto;padding:0 16px}
+    <style>body{font:15px/1.5 system-ui,sans-serif;max-width:640px;margin:32px auto;padding:0 16px}
     td{padding:4px 12px 4px 0;vertical-align:top}td:first-child{color:#666}table{border-collapse:collapse}</style>
     <h2>Work order WO-${p.id}</h2>
     <table>
       <tr><td>Road</td><td>${p.road ? esc(p.road) : 'Unrated road'}${p.paser ? ` (rated PASER ${p.paser})` : ''}, ${dir} lane</td></tr>
       <tr><td>Location</td><td>${p.lat}, ${p.lon} (<a href="https://www.google.com/maps?q=${p.lat},${p.lon}">map</a>)</td></tr>
-      <tr><td>Status</td><td>${p.state}, hit on ${p.hit_passes} of ${p.passes} passes</td></tr>
+      <tr><td>Status</td><td>${stateName[p.state]}, hit on ${p.hit_passes} of ${p.passes} passes</td></tr>
       <tr><td>Severity</td><td>${p.severity} m/s² (speed-normalized peak)</td></tr>
       <tr><td>First detected</td><td>${fmtDate(p.first_seen)}: day ${p.days_open} of ${PH.clock_days}, ${left} days before the ${PH.clock_days}-day mark</td></tr>
       <tr><td>Pass history</td><td>${p.history.map(h => `${fmtDate(h.date)}: ${h.hit ? `hit, severity ${h.severity}` : 'passed, no hit'}`).join('<br>')}</td></tr>
       <tr><td>Action</td><td>Inspect and repair. Record the repair date and method.</td></tr>
     </table>
-    <p style="color:#666;font-size:12px">Generated from fleet sensor data as of ${fmtDate(PH.as_of)}. The detection date is a
+    <p style="color:#666;font-size:13px">Generated from fleet sensor data as of ${fmtDate(PH.as_of)}. The detection date is a
     best case: the defect may have existed before the fleet first hit it. Triage estimate, not a legal determination.</p>`;
   window.open(URL.createObjectURL(new Blob([html], { type: 'text/html' })));
 }
 
-// Road Desk agent (watsonx Orchestrate web chat); ids from orchestrate/webchat_config.py
-function loadChat(c) {
-  window.wxOConfiguration = { orchestrationID: c.orchestrationID, hostURL: c.hostURL, rootElementID: 'chat',
-    showLauncher: true, chatOptions: { agentId: c.agentId, agentEnvironmentId: c.agentEnvironmentId } };
-  const s = document.createElement('script');
-  s.src = `${c.hostURL}/wxochat/wxoLoader.js?embed=true`;
-  s.onload = () => wxoLoader.init();
-  document.head.appendChild(s);
-}
-
-function renderModels(m) {
-  const pct = x => `${Math.round(x * 100)}%`;
-  document.getElementById('acc').insertAdjacentHTML('beforeend', `<h2 style="margin-top:12px">Every model, same ${m.test_sections} held-out sections</h2>
-    <table class="models">${'<tr><th></th><th>within 1</th><th>MAE</th><th title="good vs poor: how often a PASER 8-10 section ranks above a 1-4 one">good/poor</th></tr>' +
-    m.models.map(r => `<tr title="${esc(r.what)}"><td>${esc(r.name)}</td><td>${pct(r.within1)}</td><td>${r.mae}</td>
-      <td>${r.auc_good_poor ?? '·'}</td></tr>`).join('')}</table>
-    <div class="note">good/poor: chance a good section (${m.test_good}) scores better than a poor one (${m.test_poor}); 0.5 is a coin flip.</div>`);
-}
-
-function renderAccuracy(a) {
-  const grid = Array.from({ length: 10 }, () => Array(10).fill(0));
-  a.pairs.forEach(([p, e]) => grid[p - 1][e - 1]++);
-  const max = Math.max(...grid.flat());
-  const used = [...new Set(a.pairs.flat())].sort((x, y) => x - y);
-  const rows = used.map(p => `<tr><th>${p}</th>${used.map(e => {
-    const n = grid[p - 1][e - 1], near = Math.abs(p - e) <= 1;
-    return `<td style="background:${n ? mix('#2a2a2a', near ? '#2e9d4a' : '#d9342b', 0.25 + 0.75 * n / max) : '#222'}">${n || ''}</td>`;
-  }).join('')}</tr>`).join('');
-  document.getElementById('acc').innerHTML = `<h2>Estimated vs. rated PASER</h2>
-    <div class="note">Fitted on Sep 27-30 drives, scored on Oct 1 drives.<br>
-    Within one grade on <b>${Math.round(a.within1 * 100)}%</b> of ${a.sections} half-mile sections
-    (MAE ${a.mae}). Always guessing ${a.guess}: ${Math.round(a.guess_within1 * 100)}% (MAE ${a.guess_mae}).</div>
-    <table class="cm"><tr><th></th>${used.map(e => `<th>${e}</th>`).join('')}</tr>${rows}</table>
-    <div class="note">Rows: rated. Columns: estimated.</div>`;
+function renderDrives(index) {
+  const sel = document.getElementById('drive');
+  sel.innerHTML = index.drives.map(d => `<option value="${d}">${driveName(d)}</option>`).join('');
+  sel.onchange = () => show(sel.value, false);
+  document.getElementById('play').onclick = () => show(sel.value, true);
+  for (const [m, id] of [['est', 'm-est'], ['rough', 'm-rough']]) document.getElementById(id).onclick = () => {
+    mode = m;
+    document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', b.id === id));
+    show(sel.value, false);
+  };
+  legends.drives = () => `<div class="key">${mode === 'est'
+    ? `<span>Estimated PASER, from this drive</span><span class="sw"><i style="background:${C.good}"></i>good</span>
+       <span class="sw"><i style="background:${C.fair}"></i>fair</span><span class="sw"><i style="background:${C.poor}"></i>poor</span>`
+    : `<span>Roughness, from this drive</span><span class="ramp">smooth <i style="background:linear-gradient(90deg,${ramp})"></i> rough</span>`}</div>
+    <div class="key"><span class="sw"><i class="dot" style="background:#fff"></i>severe hit</span>
+      <span class="sw"><span class="mark"></span>calibration mark</span></div>`;
+  document.getElementById('t-drives').addEventListener('click', () => { if (!driveLayer) show(sel.value, false); });
 }
 
 async function show(id, animate) {
   clearInterval(timer);
   if (driveLayer) driveLayer.remove();
-  const mode = document.getElementById('mode').value;
-  document.getElementById('legend').innerHTML = legends[mode];
   const d = await json(`data/out/${id}.json`);
-  driveLayer = L.layerGroup().addTo(map);
-  L.polyline(d.track.map(p => [p[0], p[1]]), { color: '#666', weight: 2 }).addTo(driveLayer);
-  if (!animate) map.fitBounds(d.track.map(p => [p[0], p[1]]), { padding: [40, 40] });
+  driveLayer = layers.drive = L.layerGroup();
+  if (view === 'drives') driveLayer.addTo(map);
+  renderLegend();
+  L.polyline(d.track.map(p => [p[0], p[1]]), { color: '#6b6f75', weight: 2 }).addTo(driveLayer);
+  map.fitBounds(d.track.map(p => [p[0], p[1]]), { padding: [40, 40] });
 
   const wins = d.windows.map(w => ({ t: w.t, w, layer: L.polyline(w.path,
     { color: mode === 'est' ? paserColor(w.est) : roughColor(w.rn), weight: 6 })
-    .bindPopup(`<b>${w.name ? esc(w.name) : 'Unrated road'}</b><br>Estimated PASER <b>${w.est}</b>${w.paser ? `, rated ${w.paser}` : ''}<br>
-      roughness ${w.rn} m/s² (normalized to 45 mph)<br>${(w.speed * 2.237).toFixed(0)} mph`) }));
+    .bindPopup(`${blade(w.name)}<br>Estimated PASER <b>${w.est}</b>${w.paser ? `, rated ${w.paser}` : ''}<br>
+      roughness ${w.rn} m/s² at 45 mph, driven at ${(w.speed * 2.237).toFixed(0)} mph`) }));
   const hits = d.hits.map(h => ({ t: h.t, layer: L.circleMarker([h.lat, h.lon],
-    { radius: 3 + Math.min(h.severity, 20) / 3, color: '#111', weight: 1, fillColor: '#fff', fillOpacity: 0.9 })
-    .bindPopup(`<b>Severe hit</b><br>severity ${h.severity} m/s²<br>vertical ${h.vert}, lateral ${h.lat_g} m/s²<br>
-      ${(h.speed * 2.237).toFixed(0)} mph`) }));
+    { radius: 3 + Math.min(h.severity, 20) / 4, color: '#1b1b1b', weight: 1, fillColor: '#fff', fillOpacity: 0.9 })
+    .bindPopup(`<b>Severe hit</b>, severity ${h.severity}<br>vertical ${h.vert}, sideways ${h.lat_g} m/s² at ${(h.speed * 2.237).toFixed(0)} mph`) }));
   const marks = d.markers.map(m => ({ t: m[2], layer: L.marker([m[0], m[1]],
-    { icon: L.divIcon({ className: '', html: '<div class="mark"></div>', iconSize: [12, 12] }) })
-    .bindPopup('Calibration mark') }));
-
+    { icon: L.divIcon({ className: '', html: '<div class="mark"></div>', iconSize: [11, 11] }) })
+    .bindPopup('Calibration mark: the driver flagged a definite defect here') }));
   const t0 = d.track[0][2], t1 = d.track.at(-1)[2];
   const car = L.marker([d.track[0][0], d.track[0][1]],
-    { icon: L.divIcon({ className: '', html: '<div class="car"></div>', iconSize: [14, 14] }) });
+    { icon: L.divIcon({ className: '', html: '<div class="car"></div>', iconSize: [14, 14] }), keyboard: false });
 
   function render(t) {
     for (const x of [...wins, ...hits, ...marks]) x.t <= t ? x.layer.addTo(driveLayer) : x.layer.remove();
     const seen = wins.filter(x => x.t <= t);
-    const km = seen.length * 0.05, unrated = seen.filter(x => x.w.seg < 0).length * 0.05;
-    document.getElementById('stats').innerHTML =
-      `<b>${km.toFixed(1)} km</b> measured, <b>${unrated.toFixed(1)} km</b> unrated<br>` +
-      `<b>${hits.filter(x => x.t <= t).length}</b> severe hits, <b>${marks.filter(x => x.t <= t).length}</b> calibration marks`;
+    const mi = n => (n * 50 / MI).toFixed(1);
+    document.getElementById('stats').innerHTML = [
+      [mi(seen.length), 'miles measured'], [mi(seen.filter(x => x.w.seg < 0).length), 'miles on unrated roads'],
+      [hits.filter(x => x.t <= t).length, 'severe hits'], [marks.filter(x => x.t <= t).length, 'calibration marks'],
+    ].map(([v, k]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('');
   }
-
   if (!animate) return render(Infinity);
   car.addTo(driveLayer);
   const start = performance.now(), dur = 10000;
@@ -307,6 +406,96 @@ async function show(id, animate) {
     render(t);
     if (f === 1) clearInterval(timer);
   }, 50);
+}
+
+function renderForecast(fc, segs) {
+  const b = fc.backtest, floor = 0.15, cap = 0.6;
+  // most roads stay quiet: red only builds above the floor and peaks at the cap (the top tenth of roads)
+  const level = r => Math.min(Math.max((r - floor) / (cap - floor), 0), 1) ** 1.5;
+  const lines = {};
+  const byRisk = [...fc.forward.risk].sort((x, y) => x[1] - y[1]);  // riskiest drawn last, on top
+  layers.risk = L.layerGroup(byRisk.map(([id, r]) => lines[id] = L.polyline(segs[id].coords,
+    { color: mix('#4a4e54', '#de4a3c', level(r)), weight: 1.5 + 4.5 * level(r), opacity: 0.55 + 0.45 * level(r) })
+    .bindPopup(`${blade(segs[id].name)}<br>Rated PASER ${segs[id].paser} now<br>Chance of poor by ${fc.forward.to}: <b>${pct(r)}</b>`)));
+  legends.forecast = () => `<div class="key"><span>Chance of being poor by ${fc.forward.to}</span>
+    <span class="ramp">${pct(floor)} or less <i style="background:linear-gradient(90deg,#4a4e54 0%,#4a4e54 10%,#6b4a49 45%,#de4a3c)"></i> ${pct(cap)} or more</span></div>`;
+  const top = [], seen = new Set();
+  for (const [id, r] of [...fc.forward.risk].sort((x, y) => y[1] - x[1])) {
+    if (seen.has(segs[id].name)) continue;
+    seen.add(segs[id].name); top.push([id, r]);
+    if (top.length === 8) break;
+  }
+  const best = Math.max(...b.models.map(m => m.auc_fall));
+  const el = document.getElementById('forecast');
+  el.innerHTML = `<h2>Which fair roads turn poor next</h2>
+    <p class="lede">Tested on SEMCOG's own history: using ratings up to ${b.origin} only, the model picked the ${pct(b.top_share)}
+      of fair and good miles most at risk. By ${b.target}, this is how many were rated poor.</p>
+    <div class="bars">
+      <div><p>Miles the model flagged</p><span><i style="width:${pct(b.top_hit)};background:${C.poor}"></i></span><b>${pct(b.top_hit)}</b></div>
+      <div><p>All fair and good miles</p><span><i style="width:${pct(b.base_rate)};background:#6b6f75"></i></span><b>${pct(b.base_rate)}</b></div>
+    </div>
+    <p class="lede">Most likely to be poor by ${fc.forward.to}, from ratings through ${fc.forward.from}:</p>
+    <ol class="list">${top.map(([id, r]) => `<li><button class="row" data-id="${id}">${blade(segs[id].name)}
+      <span class="big">${pct(r)}<small>chance</small></span>
+      <span class="small">rated ${segs[id].paser} now</span></button></li>`).join('')}</ol>
+    <table><tr><th>Forecasting every road's ${b.target} rating</th><th>within one grade</th><th>average miss</th>
+      <th title="How well it ranks roads that fell to poor above roads that did not. 0.5 is a coin flip.">ranks fallers</th></tr>
+      ${b.models.map(m => `<tr class="${m.auc_fall === best ? 'best' : ''}" title="${esc(m.what)}"><td>${esc(m.name)}</td>
+        <td>${pct(m.within1)}</td><td>${m.mae}</td><td>${m.auc_fall}</td></tr>`).join('')}</table>
+    <p class="small">${b.miles} miles, weighted by length. Models learned from forecasts made in 2012, 2014 and 2016;
+      none saw a rating after ${b.origin}. IBM Granite TTM sees only each road's own rating history.</p>`;
+  el.querySelectorAll('.row').forEach(btn => btn.onclick = () => {
+    const l = lines[btn.dataset.id];
+    map.fitBounds(l.getBounds(), { maxZoom: 16, padding: [80, 80] });
+    l.openPopup();
+  });
+  document.getElementById('t-forecast').hidden = false;
+}
+
+function renderBrief(b) {
+  document.getElementById('brief').innerHTML = `<h2>Weekly brief</h2>
+    ${b.brief ? `<p class="brief">${esc(b.brief)}</p>` : '<p class="lede">No draft passed the number check, so the record below stands alone.</p>'}
+    <p class="small">Written by IBM Granite through watsonx Orchestrate from the record below, ${esc(b.generated.replace('T', ' '))}.
+      Every number in it was checked against the record.</p>
+    <h2>The record</h2>
+    <ul class="record">${b.facts.map(f => `<li>${esc(f)}</li>`).join('')}</ul>
+    <p class="small">Computed from the drives, not generated.</p>`;
+  document.getElementById('t-brief').hidden = false;
+}
+
+function renderAccuracy(a, models) {
+  const grid = Array.from({ length: 10 }, () => Array(10).fill(0));
+  a.pairs.forEach(([p, e]) => grid[p - 1][e - 1]++);
+  const max = Math.max(...grid.flat());
+  const used = [...new Set(a.pairs.flat())].sort((x, y) => x - y);
+  const rows = used.map(p => `<tr><th>${p}</th>${used.map(e => {
+    const n = grid[p - 1][e - 1], near = Math.abs(p - e) <= 1;
+    return `<td style="background:${n ? mix(C.shoulder, near ? C.good : C.poor, 0.25 + 0.75 * n / max) : 'transparent'}">${n || ''}</td>`;
+  }).join('')}</tr>`).join('');
+  const m = models;
+  const best = m ? Math.max(...m.models.map(r => r.auc_good_poor ?? 0)) : 0;
+  document.getElementById('accuracy').innerHTML = `<h2>How far to trust the estimate</h2>
+    <p class="lede">Road roughness tells a poor road from a good one, but not its exact grade. Fitted on the Sep 27-30 drives
+      and checked on the Oct 1 drives: within one grade on <b>${pct(a.within1)}</b> of ${a.sections} half-mile sections,
+      against ${pct(a.guess_within1)} for always guessing ${a.guess}.</p>
+    <table class="cm" aria-label="Rated PASER by row, estimated by column"><tr><th></th>${used.map(e => `<th>${e}</th>`).join('')}</tr>${rows}</table>
+    <p class="small">Rows are SEMCOG's rating, columns the estimate. Green is within one grade.</p>
+    ${m ? `<table><tr><th>Every model on the same ${m.test_sections} sections</th><th>within one grade</th><th>average miss</th>
+      <th title="How often a good section scores better than a poor one. 0.5 is a coin flip.">good vs. poor</th></tr>
+      ${m.models.map(r => `<tr class="${r.auc_good_poor === best ? 'best' : ''}" title="${esc(r.what)}"><td>${esc(r.name)}</td>
+        <td>${pct(r.within1)}</td><td>${r.mae}</td><td>${r.auc_good_poor ?? 'n/a'}</td></tr>`).join('')}</table>
+    <p class="small">IBM Granite TSPulse sees the shape of the vibration but not its size. It carries real signal on its own
+      and adds nothing on top of roughness.</p>` : ''}`;
+}
+
+// Road Desk agent (watsonx Orchestrate web chat); ids from orchestrate/webchat_config.py
+function loadChat(c) {
+  window.wxOConfiguration = { orchestrationID: c.orchestrationID, hostURL: c.hostURL, rootElementID: 'chat',
+    showLauncher: true, chatOptions: { agentId: c.agentId, agentEnvironmentId: c.agentEnvironmentId } };
+  const s = document.createElement('script');
+  s.src = `${c.hostURL}/wxochat/wxoLoader.js?embed=true`;
+  s.onload = () => wxoLoader.init();
+  document.head.appendChild(s);
 }
 init();
 </script>
