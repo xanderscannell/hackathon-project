@@ -44,6 +44,11 @@
   table.cm { border-collapse: collapse; font-size: 11px; margin-top: 6px; }
   .cm td, .cm th { width: 20px; height: 18px; text-align: center; padding: 0; color: var(--fg); }
   .cm th { color: var(--muted); font-weight: 400; }
+  #acc { max-height: calc(100% - 300px); overflow-y: auto; max-width: 340px; }
+  table.models { border-collapse: collapse; font-size: 12px; width: 100%; }
+  .models td, .models th { padding: 2px 4px; text-align: right; }
+  .models td:first-child { text-align: left; }
+  .models th { color: var(--muted); font-weight: 400; }
 </style>
 </head>
 <body>
@@ -106,6 +111,8 @@ async function init() {
     { position: 'topright', collapsed: false }).addTo(map);
 
   renderAccuracy(index.accuracy);
+  const models = await fetch('data/out/models.json').then(r => r.ok ? r.json() : null).catch(() => null);
+  if (models) renderModels(models);
   const brief = await fetch('data/out/brief.json').then(r => r.ok ? r.json() : null).catch(() => null);
   if (brief) renderBrief(brief);
   const sel = document.getElementById('drive'), mode = document.getElementById('mode');
@@ -186,6 +193,15 @@ function workOrder(id) {
     <p style="color:#666;font-size:12px">Generated from fleet sensor data as of ${fmtDate(PH.as_of)}. The detection date is a
     best case: the defect may have existed before the fleet first hit it. Triage estimate, not a legal determination.</p>`;
   window.open(URL.createObjectURL(new Blob([html], { type: 'text/html' })));
+}
+
+function renderModels(m) {
+  const pct = x => `${Math.round(x * 100)}%`;
+  document.getElementById('acc').insertAdjacentHTML('beforeend', `<h2 style="margin-top:12px">Every model, same ${m.test_sections} held-out sections</h2>
+    <table class="models">${'<tr><th></th><th>within 1</th><th>MAE</th><th title="good vs poor: how often a PASER 8-10 section ranks above a 1-4 one">good/poor</th></tr>' +
+    m.models.map(r => `<tr title="${esc(r.what)}"><td>${esc(r.name)}</td><td>${pct(r.within1)}</td><td>${r.mae}</td>
+      <td>${r.auc_good_poor ?? '·'}</td></tr>`).join('')}</table>
+    <div class="note">good/poor: chance a good section (${m.test_good}) scores better than a poor one (${m.test_poor}); 0.5 is a coin flip.</div>`);
 }
 
 function renderAccuracy(a) {

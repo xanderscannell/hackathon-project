@@ -15,3 +15,13 @@ python -m http.server 8000    # then open http://localhost:8000
 ```
 
 `data/` is gitignored. Expected layout: `data/raw/drives/<drive>_{imu,gps,markers}.csv` and `data/raw/semcog_paser_commute.geojson`.
+
+## Model comparison
+
+```
+python -m venv .venv-ml && .venv-ml/Scripts/python -m pip install granite-tsfm "transformers[torch]<5"
+.venv-ml/Scripts/python tspulse_embed.py   # IBM Granite TSPulse embeddings -> data/out/tspulse/
+python model.py                            # every model on the same held-out sections -> data/out/models.json
+```
+
+`transformers` 5.x breaks TSPulse's output shapes, hence the pin.
