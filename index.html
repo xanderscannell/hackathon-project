@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Road Condition Map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  :root { --bg: #111; --panel: #1c1c1c; --fg: #eee; --muted: #999; --accent: #f28c28; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px system-ui, sans-serif; }
+  #map { position: absolute; inset: 0; background: var(--bg); }
+  .dark-tiles { filter: invert(1) hue-rotate(180deg) brightness(0.7) contrast(0.9); }
+  #panel { position: absolute; top: 12px; left: 12px; z-index: 1000; background: var(--panel);
+           padding: 12px 14px; border-radius: 8px; min-width: 240px; box-shadow: 0 2px 12px #0008; }
+  #panel h1 { font-size: 15px; margin: 0 0 8px; }
+  select, button { font: inherit; background: #2a2a2a; color: var(--fg); border: 1px solid #444;
+                   border-radius: 4px; padding: 4px 8px; }
+  button { background: var(--accent); color: #111; border: 0; font-weight: 600; cursor: pointer; }
+  .row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .stat { color: var(--muted); line-height: 1.6; }
+  .stat b { color: var(--fg); }
+  .legend { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .ramp { flex: 1; height: 8px; border-radius: 4px;
+          background: linear-gradient(90deg, #3a7bd5, #f5f5f5, #f28c28, #e0245e); }
+  .mark { width: 12px; height: 12px; background: var(--accent); transform: rotate(45deg); border: 2px solid #111; }
+  .car { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 3px solid var(--accent); }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="panel">
+  <h1>Road Condition Map</h1>
+  <div class="row"><select id="drive"></select><button id="play">Replay</button></div>
+  <div class="stat" id="stats"></div>
+  <div class="legend">smooth <div class="ramp"></div> rough</div>
+</div>
+<script>
+const map = L.map('map', { preferCanvas: true }).setView([42.2, -83.3], 11);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap', maxZoom: 19, className: 'dark-tiles' }).addTo(map);
+
+const paserColor = p => p >= 8 ? '#2e9d4a' : p >= 5 ? '#e5b100' : '#d9342b';
+const ramp = ['#3a7bd5', '#f5f5f5', '#f28c28', '#e0245e'];
+let pct, driveLayer, timer;
+
+function mix(a, b, f) {
+  const n = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const [x, y] = [n(a), n(b)];
+  return `rgb(${x.map((v, i) => Math.round(v + (y[i] - v) * f))})`;
+}
+function roughColor(r) {
+  const [lo, , hi] = pct;
+  const f = Math.min(Math.max((r - lo) / (hi - lo), 0), 1) * (ramp.length - 1);
+  const i = Math.min(Math.floor(f), ramp.length - 2);
+  return mix(ramp[i], ramp[i + 1], f - i);
+}
+
+async function init() {
+  const index = await (await fetch('data/out/index.json')).json();
+  pct = index.rough_pct;
+  const segs = await (await fetch('data/out/segments.json')).json();
+  const paser = L.layerGroup(segs.map(s => L.polyline(s.coords, { color: paserColor(s.paser), weight: 2, opacity: 0.45 })
+    .bindPopup(`<b>${s.name}</b><br>PASER ${s.paser} (rated ${s.evalyear})<br>${s.surface}`))).addTo(map);
+  L.control.layers(null, { 'SEMCOG PASER': paser }, { position: 'topright' }).addTo(map);
+
+  const sel = document.getElementById('drive');
+  sel.innerHTML = index.drives.map(d => `<option>${d}</option>`).join('');
+  sel.onchange = () => show(sel.value, false);
+  document.getElementById('play').onclick = () => show(sel.value, true);
+  show(index.drives[0], false);
+}
+
+async function show(id, animate) {
+  clearInterval(timer);
+  if (driveLayer) driveLayer.remove();
+  const d = await (await fetch(`data/out/${id}.json`)).json();
+  driveLayer = L.layerGroup().addTo(map);
+  L.polyline(d.track.map(p => [p[0], p[1]]), { color: '#666', weight: 2 }).addTo(driveLayer);
+  map.fitBounds(d.track.map(p => [p[0], p[1]]), { padding: [40, 40] });
+
+  const wins = d.windows.map(w => ({ w, line: L.polyline(w.path, { color: roughColor(w.rough), weight: 6 })
+    .bindPopup(`<b>${w.name ?? 'Unrated road'}</b>${w.paser ? ` (PASER ${w.paser})` : ''}<br>
+      roughness ${w.rough} m/s² vertical, ${w.rough_lat} lateral<br>${(w.speed * 2.237).toFixed(0)} mph`) }));
+  const marks = d.markers.map(m => ({ t: m[2], m: L.marker([m[0], m[1]],
+    { icon: L.divIcon({ className: '', html: '<div class="mark"></div>', iconSize: [12, 12] }) })
+    .bindPopup('Calibration mark') }));
+
+  const t0 = d.track[0][2], t1 = d.track.at(-1)[2];
+  const car = L.marker([d.track[0][0], d.track[0][1]],
+    { icon: L.divIcon({ className: '', html: '<div class="car"></div>', iconSize: [14, 14] }) });
+
+  function render(t) {
+    let km = 0, unrated = 0;
+    for (const { w, line } of wins) {
+      if (w.t > t) { line.remove(); continue; }
+      line.addTo(driveLayer);
+      km += 0.05; if (w.seg < 0) unrated += 0.05;
+    }
+    for (const { t: mt, m } of marks) mt <= t ? m.addTo(driveLayer) : m.remove();
+    document.getElementById('stats').innerHTML =
+      `<b>${km.toFixed(1)} km</b> measured<br><b>${unrated.toFixed(1)} km</b> on unrated roads<br>` +
+      `<b>${marks.filter(x => x.t <= t).length}</b> calibration marks`;
+  }
+
+  if (!animate) return render(Infinity);
+  car.addTo(driveLayer);
+  const start = performance.now(), dur = 10000;
+  timer = setInterval(() => {
+    const f = Math.min((performance.now() - start) / dur, 1), t = t0 + f * (t1 - t0);
+    const p = d.track.find(p => p[2] >= t) ?? d.track.at(-1);
+    car.setLatLng([p[0], p[1]]);
+    render(t);
+    if (f === 1) clearInterval(timer);
+  }, 50);
+}
+init();
+</script>
+</body>
+</html>
