@@ -22,6 +22,7 @@ YEARS = list(range(2003, 2025))
 HORIZON = 4
 POOR = 4          # Michigan: 1-4 poor
 TOP_SHARE = 0.10  # share of fair/good miles flagged as most at risk
+LIKELY = 0.5      # a segment this likely to be poor in four years counts as "likely poor"
 
 
 def load():
@@ -114,6 +115,25 @@ def main():
                     "risk": [[int(s), round(float(r), 3)] for s, r in zip(np.flatnonzero(fair_good), forward)]},
     }, separators=(",", ":")))
     print(f"wrote forecast.json: {fair_good.sum()} fair/good segments with a 2028 risk")
+
+    # the same forecast by road, small enough for the public API: where preventive work pays off
+    seg = pd.DataFrame({"road": props.STRNAME.str.strip()[fair_good].to_numpy(), "miles": miles[fair_good],
+                        "rating": now.rating[fair_good].to_numpy(), "risk": forward})
+    seg["likely_miles"] = seg.miles * (seg.risk >= LIKELY)
+    roads = seg.groupby("road").agg(fair_good_rated_miles=("miles", "sum"), likely_poor_miles=("likely_miles", "sum"),
+                                    highest_risk=("risk", "max"), rating_now=("rating", "median"))
+    roads["average_risk"] = seg.assign(rm=seg.risk * seg.miles).groupby("road").rm.sum() / roads.fair_good_rated_miles
+    roads = roads.sort_values(["likely_poor_miles", "highest_risk"], ascending=False)
+    (P.OUT / "at_risk.json").write_text(json.dumps({
+        "from": 2024, "to": 2024 + HORIZON, "likely_threshold": LIKELY,
+        "track_record": (f"This forecast is our model, trained on SEMCOG's rating history. Tested on past years with ratings up to "
+                         f"2020 only, {hit:.0%} of the fair and good miles it flagged as most at risk were rated poor by 2024, "
+                         f"against {base:.0%} of all fair and good miles."),
+        "roads": [{"road": r, "fair_good_rated_miles": round(v.fair_good_rated_miles, 2), "likely_poor_miles": round(v.likely_poor_miles, 2),
+                   "highest_risk": round(v.highest_risk, 2), "average_risk": round(v.average_risk, 2),
+                   "rating_now": round(v.rating_now, 1)} for r, v in roads.iterrows()],
+    }, separators=(",", ":")))
+    print(f"wrote at_risk.json: {len(roads)} roads, {int((roads.likely_poor_miles > 0).sum())} with miles likely poor by 2028")
 
 
 if __name__ == "__main__":

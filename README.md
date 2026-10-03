@@ -41,7 +41,7 @@ sh deploy_api.sh                                        # read-only API on IBM C
 .venv/Scripts/orchestrate connections set-credentials -a road_api --env draft -e "url=<api url>"   # and --env live
 ```
 
-The deployed API is public, so it answers only `/api/` and carries only the three files the API reads; the dashboard and the raw drive tracks stay local. For a quick local test, `cloudflared tunnel --url http://localhost:8000` works too: requests through it also get `/api/` only.
+The deployed API is public, so it answers only `/api/` and carries only the data files the API reads; the dashboard and the raw drive tracks stay local. For a quick local test, `cloudflared tunnel --url http://localhost:8000` works too: requests through it also get `/api/` only.
 
 ## Deterioration forecast
 

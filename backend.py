@@ -106,11 +106,31 @@ def work_order(q):
             "caveat": "The detection date is a best case: the defect may be older. Triage estimate, not a legal determination."}
 
 
+def at_risk(q):
+    ar = load("at_risk.json")
+    name = norm(q.get("road", ""))
+    limit = max(1, min(int(q.get("limit") or 10), 25))
+    rows = [r for r in ar["roads"] if name in norm(r["road"])] if name else ar["roads"]
+    # one sentence per road, so the agent quotes numbers instead of deriving new ones
+    rows = [{**r, "summary": f"{r['road']}: {r['likely_poor_miles']} of its {r['fair_good_rated_miles']} fair or good "
+             f"rated miles are likely to be poor by {ar['to']}; its riskiest stretch has a "
+             f"{round(r['highest_risk'] * 100)}% chance. Rated {r['rating_now']:g} now."} for r in rows]
+    out = {"forecast": f"chance of being rated poor (PASER 1-4) by {ar['to']}, from SEMCOG ratings through {ar['from']}",
+           "likely_poor_means": f"at least {round(ar['likely_threshold'] * 100)}% chance",
+           "track_record": ar["track_record"], "order": "most miles likely poor first",
+           "roads": rows[:limit], "total_matching": len(rows)}
+    if not rows:
+        out["note"] = (f"No fair or good rated road matches {q.get('road')!r}. It may already be rated poor, or not be "
+                       "rated at all. Say so; do not estimate a risk.")
+    return out
+
+
 def summary(q):
     return {"facts": load("facts.json"), "note": "Every number here is computed. Quote them; do not total or round them."}
 
 
-API = {"/api/potholes": potholes, "/api/road": road, "/api/work_order": work_order, "/api/summary": summary}
+API = {"/api/potholes": potholes, "/api/road": road, "/api/work_order": work_order, "/api/summary": summary,
+       "/api/at_risk": at_risk}
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -146,6 +166,10 @@ def selftest():
     assert "note" in work_order({"id": "abc"}) and "note" in work_order({"id": "999999"})
     old = potholes({"order": "oldest"})["potholes"]
     assert old[0]["days_open"] == max(p["days_open"] for p in potholes({"limit": 25})["potholes"] + old)
+    risk = at_risk({})["roads"]
+    assert risk and all(a["likely_poor_miles"] >= b["likely_poor_miles"] for a, b in zip(risk, risk[1:]))
+    assert at_risk({"road": "michigan avenue"})["roads"][0]["road"] == "Michigan Ave"
+    assert "note" in at_risk({"road": "No Such Road"})
     first = potholes({})["potholes"][0]
     assert work_order({"id": str(first["id"])})["work_order"] == f"WO-{first['id']}"
     print("selftest ok")

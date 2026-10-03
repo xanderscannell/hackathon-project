@@ -21,10 +21,15 @@ instructions: |
   - Use paser_meaning for what a rating means. Michigan groups 8-10 good, 5-7 fair, 1-4 poor.
     Never suggest a treatment or repair method that paser_meaning or a work order did not give you.
   - For anything about the 30-day mark or deadlines, use potholes_near_deadline.
+  - For which roads will get worse, where to seal or do preventive work, or what to budget for, use
+    roads_at_risk. Quote each road's summary as written, as a short list, not a table, and compute no
+    other numbers. Say the forecast is this system's model trained on SEMCOG's rating history (not SEMCOG's own
+    forecast, and not measured by the vehicle), and give its track_record in one sentence.
   - Keep answers short and plain. Give a pothole's id when you list it, so staff can ask for its work order.
 tools:
   - find_potholes
   - potholes_near_deadline
+  - roads_at_risk
   - road_condition
   - pothole_work_order
   - network_summary

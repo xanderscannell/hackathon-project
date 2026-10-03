@@ -98,6 +98,22 @@ def pothole_work_order(pothole_id: int) -> dict:
 
 
 @tool(expected_credentials=CREDS)
+def roads_at_risk(road: str = "", limit: int = 10) -> dict:
+    """Fair and good rated roads most likely to become poor (PASER 1-4) within four years: where preventive
+    work, done now while the road is still fair, saves a rebuild later.
+
+    Args:
+        road (str): Optional road name or part of it. Empty for the riskiest roads overall.
+        limit (int): How many roads to return, at most 25.
+
+    Returns:
+        dict: "roads" with fair_good_rated_miles, likely_poor_miles, highest_risk and average_risk (0 to 1) and rating_now;
+        "track_record" says how well the forecast did on past years and must be mentioned; "note" explains a miss.
+    """
+    return _get("/api/at_risk", road=road, limit=limit)
+
+
+@tool(expected_credentials=CREDS)
 def network_summary() -> dict:
     """This week's computed facts: miles measured, unrated miles, confirmed potholes, the most severe, the oldest.
 
