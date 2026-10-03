@@ -15,6 +15,13 @@
           border-radius: 8px; box-shadow: 0 2px 12px #0008; }
   #panel { top: 12px; left: 12px; min-width: 250px; }
   #acc { bottom: 24px; left: 12px; max-width: 300px; }
+  #rank { top: 120px; right: 12px; width: 300px; max-height: calc(100% - 170px); overflow-y: auto; }
+  #rank ol { margin: 0; padding: 0; list-style: none; }
+  #rank li { padding: 6px 4px; border-top: 1px solid #333; cursor: pointer; line-height: 1.35; }
+  #rank li:hover { background: #262626; }
+  .pill { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 8px; color: #111; font-weight: 600; }
+  .clock { height: 4px; background: #333; border-radius: 2px; margin-top: 3px; }
+  .clock div { height: 100%; border-radius: 2px; background: var(--accent); }
   h1 { font-size: 15px; margin: 0 0 8px; }
   h2 { font-size: 13px; margin: 0 0 6px; }
   select, button { font: inherit; background: #2a2a2a; color: var(--fg); border: 1px solid #444;
@@ -43,6 +50,7 @@
   <div class="legend" id="legend"></div>
 </div>
 <div id="acc" class="card"></div>
+<div id="rank" class="card"></div>
 <script>
 const map = L.map('map', { preferCanvas: true }).setView([42.2, -83.3], 11);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -83,7 +91,10 @@ async function init() {
     .bindPopup(`<b>${esc(s.name)}</b><br>Estimated PASER <b>${s.est}</b>, rated ${s.paser}<br>
       ${s.n} windows over ${s.passes} pass${s.passes > 1 ? 'es' : ''}<br>
       median roughness ${s.rn} m/s² (normalized to 45 mph)`)));
-  L.control.layers(null, { 'Rated PASER (SEMCOG)': paser, 'Estimated PASER by section': est },
+  const ph = await json('data/out/potholes.json');
+  const [confirmed, suspected] = potholeLayers(ph);
+  L.control.layers(null, { 'Rated PASER (SEMCOG)': paser, 'Estimated PASER by section': est,
+    'Potholes (confirmed)': confirmed, 'Suspected (one pass)': suspected },
     { position: 'topright', collapsed: false }).addTo(map);
 
   renderAccuracy(index.accuracy);
@@ -92,6 +103,38 @@ async function init() {
   sel.onchange = mode.onchange = () => show(sel.value, false);
   document.getElementById('play').onclick = () => show(sel.value, true);
   show(index.drives[0], false);
+}
+
+const stateColor = { Suspected: '#888', Confirmed: '#f28c28', Worsening: '#e0245e', Repaired: '#2e9d4a', PatchFailed: '#a259ff' };
+const pill = s => `<span class="pill" style="background:${stateColor[s]}">${s}</span>`;
+const fmtDate = s => new Date(s + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+function potholeLayers(ph) {
+  const popup = p => `<b>${p.road ? esc(p.road) : 'Unrated road'}</b>${p.paser ? ` (PASER ${p.paser})` : ''}<br>
+    ${pill(p.state)} severity ${p.severity} m/s², hit on ${p.hit_passes} of ${p.passes} passes<br>
+    First seen ${fmtDate(p.first_seen)}: day ${p.days_open} of ${ph.clock_days}<br>
+    <div class="note">${p.history.map(h => `${fmtDate(h.date)} ${h.hit ? `hit, ${h.severity}` : 'passed, no hit'}`).join('<br>')}</div>`;
+  const layer = list => L.layerGroup(list.map(p => {
+    p.marker = L.circleMarker([p.lat, p.lon], { radius: p.state === 'Suspected' ? 4 : 5 + Math.min(p.severity, 20) / 3,
+      color: '#111', weight: 1.5, fillColor: stateColor[p.state], fillOpacity: 0.95 }).bindPopup(popup(p));
+    return p.marker;
+  }));
+  const conf = ph.potholes.filter(p => p.state !== 'Suspected');
+  const confirmed = layer(conf).addTo(map), suspected = layer(ph.potholes.filter(p => p.state === 'Suspected'));
+
+  // ranked list: severity order; the clock is shown, not used to sort
+  document.getElementById('rank').innerHTML = `<h2>Repair priority</h2>
+    <div class="note">${conf.length} confirmed on 2+ passes, as of ${fmtDate(ph.as_of)}. Day 0 is the first detection.</div>
+    <ol>${conf.slice(0, 25).map((p, i) => `<li data-i="${i}">
+      <b>${i + 1}. ${p.road ? esc(p.road) : 'Unrated road'}</b> ${pill(p.state)}<br>
+      <span class="stat">severity <b>${p.severity}</b> · ${p.hit_passes}/${p.passes} passes · day ${p.days_open} of ${ph.clock_days}</span>
+      <div class="clock"><div style="width:${Math.min(100, 100 * p.days_open / ph.clock_days)}%"></div></div></li>`).join('')}</ol>`;
+  document.querySelectorAll('#rank li').forEach(li => li.onclick = () => {
+    const p = conf[li.dataset.i];
+    map.setView([p.lat, p.lon], 17);
+    p.marker.openPopup();
+  });
+  return [confirmed, suspected];
 }
 
 function renderAccuracy(a) {

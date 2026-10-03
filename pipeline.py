@@ -31,6 +31,10 @@ HIT_MS2 = 4.5          # severe hit: speed-normalized peak above this...
 HIT_RATIO = 3          # ...and this many times the surrounding road's level
 SECTION_MI = 0.5       # rated sections are this long along a road
 TEST_PREFIX = "drive_202610"  # drives scored, never fitted on
+CLUSTER_M = 15         # hits this close, same direction of travel, are one spot (GPS ~4 m)
+REPAIR_PASSES = 3      # clean passes in a row before a confirmed spot counts as repaired
+WORSE_RATIO = 1.3      # a hit this much above the spot's median severity so far is worsening
+CLOCK_DAYS = 30        # MCL 691.1403: knowledge presumed after 30 days readily apparent
 # Rated before a rebuild; their ratings would teach the fit the wrong answer.
 STALE = {"Evergreen Rd"}  # ponytail: whole road by name; the rebuilt stretch only, if other parts matter
 LAT0, LON0 = 42.2, -83.3
@@ -40,6 +44,10 @@ KY = 110_540
 
 def to_xy(lat, lon):
     return (np.asarray(lon) - LON0) * KX, (np.asarray(lat) - LAT0) * KY
+
+
+def from_xy(x, y):
+    return np.asarray(y) / KY + LAT0, np.asarray(x) / KX + LON0
 
 
 def load_segments():
@@ -63,9 +71,15 @@ def load_segments():
     return segs, np.array(pieces)
 
 
-def snap(px, py, bearing, pieces):
-    """Nearest piece within SNAP_M whose direction matches bearing (either way).
-    Returns segment index per point, -1 where nothing qualifies."""
+def angle_diff(a, b, directed=False):
+    """Smallest difference between compass bearings; undirected treats a road both ways."""
+    m = 360 if directed else 180
+    return np.abs((np.asarray(a) - b + m / 2) % m - m / 2)
+
+
+def snap(px, py, bearing, pieces, radius=SNAP_M, directed=False):
+    """Nearest piece within radius whose direction matches bearing (either way
+    unless directed). Returns segment index per point, -1 where nothing qualifies."""
     ax, ay, bx, by, seg = pieces.T
     dx, dy = bx - ax, by - ay
     len2 = np.maximum(dx * dx + dy * dy, 1e-9)
@@ -74,10 +88,9 @@ def snap(px, py, bearing, pieces):
     for i in range(len(px)):
         t = np.clip(((px[i] - ax) * dx + (py[i] - ay) * dy) / len2, 0, 1)
         d = np.hypot(ax + t * dx - px[i], ay + t * dy - py[i])
-        diff = np.abs((piece_deg - bearing[i] + 90) % 180 - 90)
-        d[diff > SNAP_DEG] = np.inf
+        d[angle_diff(piece_deg, bearing[i], directed) > SNAP_DEG] = np.inf
         k = np.argmin(d)
-        if d[k] <= SNAP_M:
+        if d[k] <= radius:
             out[i] = int(seg[k])
     return out
 
@@ -154,9 +167,12 @@ def process(stem, segs, pieces):
     hits = []
     for i in find_hits(t, speed, mag):
         j = slice(i, i + 100)  # the hit's first second
+        a, b = max(i - 100, 0), min(i + 100, len(t) - 1)  # heading over the 2 s around it
+        x, y = to_xy(lat[[a, b]], lon[[a, b]])
         hits.append({
             "t": round(t[i] / 1000, 2),
             "lat": round(lat[i], 6), "lon": round(lon[i], 6),
+            "heading": round(float(np.degrees(np.arctan2(x[1] - x[0], y[1] - y[0]))) % 360, 1),
             "severity": round(float(speed_norm(mag[j].max(), speed[i])), 1),
             "vert": round(float(np.abs(vert[j]).max()), 1),
             "lat_g": round(float(np.abs(lat_acc[j]).max()), 1),
@@ -166,8 +182,8 @@ def process(stem, segs, pieces):
     one_hz = slice(None, None, 100)
     return {
         "id": stem,
-        "track": [[round(a, 6), round(b, 6), round(c / 1000, 2)]
-                  for a, b, c in zip(lat[one_hz], lon[one_hz], t[one_hz])],
+        "track": [[round(a, 6), round(b, 6), round(c / 1000, 2), round(s, 1)]
+                  for a, b, c, s in zip(lat[one_hz], lon[one_hz], t[one_hz], speed[one_hz])],
         "windows": windows,
         "hits": hits,
         "markers": [[round(a, 6), round(b, 6), round(c / 1000, 2)]
@@ -198,6 +214,106 @@ def summarize(df):
     s = g.agg(rn=("rn", "median"), paser=("paser", "first"), n=("rn", "size"),
               passes=("drive", "nunique"))
     return s[s.n >= 4]  # under 200 m of road in total is too little to rate
+
+
+def drive_date(drive_id):
+    return pd.Timestamp(drive_id.split("_")[1]).date()
+
+
+def cluster_hits(drives):
+    """Group hits from every drive that land within CLUSTER_M of each other while
+    travelling the same way, so opposite lanes stay separate."""
+    clusters = []
+    for d in drives:
+        for h in d["hits"]:
+            x, y = to_xy(h["lat"], h["lon"])
+            best, best_d = None, CLUSTER_M
+            for c in clusters:
+                dist = np.hypot(c["x"] - x, c["y"] - y)
+                if dist <= best_d and angle_diff(c["heading"], h["heading"], directed=True) <= SNAP_DEG:
+                    best, best_d = c, dist
+            if best is None:
+                best = {"x": 0.0, "y": 0.0, "heading": h["heading"], "hits": []}
+                clusters.append(best)
+            best["hits"].append((d["id"], h))
+            n = len(best["hits"])
+            best["x"] += (x - best["x"]) / n  # running mean position
+            best["y"] += (y - best["y"]) / n
+    return clusters
+
+
+def lifecycle(passes):
+    """State after a time-ordered list of (hit, severity) passes over one spot."""
+    state, clean, severities = None, 0, []
+    for hit, sev in passes:
+        if not hit:
+            clean += 1
+            if state in ("Confirmed", "Worsening", "PatchFailed") and clean >= REPAIR_PASSES:
+                state = "Repaired"
+            continue
+        clean = 0
+        if state is None:
+            state = "Suspected"
+        elif state == "Suspected":
+            state = "Confirmed"
+        elif state == "Repaired":
+            state = "PatchFailed"
+        elif sev > WORSE_RATIO * np.median(severities):
+            state = "Worsening"
+        severities.append(sev)
+    return state
+
+
+def build_potholes(drives, segs, pieces):
+    """Confirm hits across passes and give every spot a lifecycle and a clock.
+    Day 0 is the first detection: the earliest evidence it existed."""
+    clusters = cluster_hits(drives)
+    as_of = max(drive_date(d["id"]) for d in drives)
+    # which clusters did each drive go over, in the same direction, while moving?
+    px = np.array([c["x"] for c in clusters])
+    py = np.array([c["y"] for c in clusters])
+    hd = np.array([c["heading"] for c in clusters])
+    passed = {}
+    for d in drives:
+        tr = np.array(d["track"])
+        x, y = to_xy(tr[:, 0], tr[:, 1])
+        moving = (tr[:-1, 3] >= MIN_SPEED) & (tr[1:, 3] >= MIN_SPEED)
+        track_pieces = np.column_stack([x[:-1], y[:-1], x[1:], y[1:], np.zeros(len(x) - 1)])[moving]
+        passed[d["id"]] = snap(px, py, hd, track_pieces, radius=CLUSTER_M, directed=True) >= 0
+
+    lat, lon = from_xy(px, py)
+    road = snap(px, py, hd, pieces)
+    out = []
+    for i, c in enumerate(clusters):
+        by_drive = {}
+        for drive_id, h in c["hits"]:
+            by_drive.setdefault(drive_id, []).append(h["severity"])
+        history = []
+        for d in drives:  # drives are in time order
+            if d["id"] in by_drive or passed[d["id"]][i]:
+                sev = max(by_drive.get(d["id"], [0]))
+                history.append({"drive": d["id"], "date": str(drive_date(d["id"])),
+                                "hit": d["id"] in by_drive, "severity": sev})
+        hit_passes = [p for p in history if p["hit"]]
+        first = drive_date(hit_passes[0]["drive"])
+        s = int(road[i])
+        out.append({
+            "id": i,
+            "lat": round(float(lat[i]), 6), "lon": round(float(lon[i]), 6),
+            "heading": round(float(c["heading"]), 1),
+            "road": segs[s]["name"] if s >= 0 else None,
+            "paser": segs[s]["paser"] if s >= 0 else None,
+            "state": lifecycle([(p["hit"], p["severity"]) for p in history]),
+            "severity": round(float(np.median([p["severity"] for p in hit_passes])), 1),
+            "passes": len(history), "hit_passes": len(hit_passes),
+            "confidence": round(len(hit_passes) / len(history), 2),
+            "first_seen": str(first), "last_hit": hit_passes[-1]["date"],
+            "days_open": (as_of - first).days,
+            "history": history,
+        })
+    # ranked list: severity decides order; the clock is shown, not used to sort
+    out.sort(key=lambda p: -p["severity"])
+    return {"as_of": str(as_of), "clock_days": CLOCK_DAYS, "potholes": out}
 
 
 def main():
@@ -258,6 +374,10 @@ def main():
         "rough_pct": np.percentile(rn_all, [10, 50, 90]).round(3).tolist(),
         "accuracy": accuracy,
     }))
+    potholes = build_potholes(drives, segs, pieces)
+    (OUT / "potholes.json").write_text(json.dumps(potholes, separators=(",", ":")))
+    states = pd.Series([p["state"] for p in potholes["potholes"]]).value_counts().to_dict()
+    print(f"{len(potholes['potholes'])} spots as of {potholes['as_of']}: {states}")
     print(f"fit PASER = {a:.2f} {b:+.2f} ln(roughness) on {len(train_s)} sections")
     print(f"test: {accuracy['sections']} sections, within one grade {accuracy['within1']:.0%}, "
           f"MAE {accuracy['mae']}; always guessing {guess}: {accuracy['guess_within1']:.0%}, "
@@ -272,6 +392,8 @@ def selftest():
     assert snap(px, py, bearing, pieces).tolist() == [7, 7, -1, -1]
     x, y = to_xy([LAT0 + 0.001], [LON0])
     assert abs(y[0] - 110.54) < 0.01 and abs(x[0]) < 1e-9
+    la, lo = from_xy(*to_xy(42.1155, -83.3919))
+    assert abs(la - 42.1155) < 1e-9 and abs(lo + 83.3919) < 1e-9
 
     # 20 s of quiet road at 20 m/s with one 5-sample bump and one lone spike
     t = np.arange(2000) * 10.0
@@ -281,6 +403,17 @@ def selftest():
     mag[1500] = 30.0     # lone corrupted sample: never a hit
     assert find_hits(t, speed, mag) == [800]
     assert find_hits(t, np.zeros(2000), mag) == []  # parked: nothing counts
+
+    H, M = (True, 5.0), (False, 0)
+    assert lifecycle([M, H]) == "Suspected"
+    assert lifecycle([H, M, H]) == "Confirmed"
+    assert lifecycle([H, H, (True, 9.0)]) == "Worsening"
+    assert lifecycle([H, H, M, M]) == "Confirmed"          # two misses is not a repair
+    assert lifecycle([H, H, M, M, M]) == "Repaired"
+    assert lifecycle([H, H, M, M, M, H]) == "PatchFailed"
+    assert lifecycle([H, M, M, M]) == "Suspected"          # never confirmed, never repaired
+    assert angle_diff(10, 350, directed=True) == 20 and angle_diff(10, 190) == 0
+    assert angle_diff(10, 190, directed=True) == 180       # opposite lanes stay apart
     print("selftest ok")
 
 
