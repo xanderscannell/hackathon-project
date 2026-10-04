@@ -4,14 +4,19 @@
     python backend.py --selftest
 
 Locally: index.html, data/out/ and /api/. Public (API_ONLY set, as on Code Engine,
-or requests through a Cloudflare tunnel): /api/ only, since data/out holds raw drive tracks.
-Nothing else in the repo is ever served. Every miss answers with a
-sentence the agent can't skip, never an empty list.
+or requests through a Cloudflare tunnel) or from another machine: /api/ only, since
+data/out holds raw drive tracks. Nothing else in the repo is ever served. Every miss
+answers with a sentence the agent can't skip, never an empty list.
+
+The device (device/) uploads its events with POST /live, from the local network only:
+    HOST=0.0.0.0 python backend.py
 """
 import json
 import os
 import re
 import sys
+import threading
+import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -129,6 +134,36 @@ def summary(q):
     return {"facts": load("facts.json"), "note": "Every number here is computed. Quote them; do not total or round them."}
 
 
+LIVE = OUT / "live.jsonl"
+live_lock = threading.Lock()
+live_seen = None  # (run, n) of every stored event
+
+
+def ingest(body):
+    """The device's events: the new ones go on the end of data/out/live.jsonl, stamped with when they arrived.
+    The device resends a batch whose upload failed, so events already stored are skipped. A torn line (a power
+    cut mid-write on the card) is skipped too, never refused: a refused batch would block the device's queue."""
+    global live_seen
+    with live_lock:
+        if live_seen is None:
+            live_seen = {(e["run"], e["n"]) for e in map(json.loads, LIVE.read_text().splitlines())} if LIVE.exists() else set()
+        new, bad = [], 0
+        for line in body.splitlines():
+            try:
+                e = json.loads(line)
+                key = (e["run"], e["n"])
+            except (ValueError, KeyError, TypeError):
+                bad += bool(line.strip())
+                continue
+            if key not in live_seen:
+                live_seen.add(key)
+                new.append(json.dumps({**e, "rx": round(time.time(), 1)}, separators=(",", ":")))
+        if new:
+            with LIVE.open("a") as f:
+                f.write("".join(line + "\n" for line in new))
+    return {"stored": len(new), "skipped": bad}
+
+
 API = {"/api/potholes": potholes, "/api/road": road, "/api/work_order": work_order, "/api/summary": summary,
        "/api/at_risk": at_risk}
 
@@ -142,19 +177,34 @@ class Handler(SimpleHTTPRequestHandler):
                 body, code = API[url.path](q), 200
             except Exception as e:  # the agent gets a sentence, not a stack trace
                 body, code = {"note": f"The backend failed ({type(e).__name__}). Say so; do not guess."}, 500
-            data = json.dumps(body).encode()
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-        elif API_ONLY or self.headers.get("Cf-Connecting-Ip"):
-            # public (Code Engine, or the tunnel): API only. data/out holds raw drive tracks and account ids.
+            self.reply(body, code)
+        elif self.public():
+            # public (Code Engine, the tunnel, another machine): API only. data/out holds raw drive tracks and account ids.
             self.send_error(404)
         elif url.path in ("/", "/index.html") or (url.path.startswith("/data/out/") and ".." not in url.path):
             super().do_GET()
         else:
             self.send_error(404)
+
+    def do_POST(self):
+        # the device's uploads: local network only, never through the tunnel or on Code Engine
+        if API_ONLY or self.headers.get("Cf-Connecting-Ip") or urlparse(self.path).path != "/live":
+            return self.send_error(404)
+        n = int(self.headers.get("Content-Length") or 0)
+        if not 0 < n <= 1 << 20:
+            return self.send_error(413)
+        self.reply(ingest(self.rfile.read(n).decode("utf-8", "replace")), 200)
+
+    def public(self):
+        return API_ONLY or self.headers.get("Cf-Connecting-Ip") or self.client_address[0] not in ("127.0.0.1", "::1")
+
+    def reply(self, body, code):
+        data = json.dumps(body).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
 
 def selftest():
@@ -172,6 +222,16 @@ def selftest():
     assert "note" in at_risk({"road": "No Such Road"})
     first = potholes({})["potholes"][0]
     assert work_order({"id": str(first["id"])})["work_order"] == f"WO-{first['id']}"
+
+    global LIVE, live_seen
+    import tempfile
+    LIVE, live_seen = Path(tempfile.mkdtemp()) / "live.jsonl", None
+    batch = '{"run":1,"n":0,"k":"hit"}\n{"run":1,"n":1,"k":"win"}\n'
+    assert ingest(batch) == {"stored": 2, "skipped": 0}
+    assert ingest(batch + '{"run":1,"n":2,"k\n') == {"stored": 0, "skipped": 1}  # resent after a failed upload; a torn line
+    live_seen = None  # after a restart, what is stored is still known
+    assert ingest('{"run":1,"n":1}\n{"run":2,"n":1}') == {"stored": 1, "skipped": 0}
+    assert len(LIVE.read_text().splitlines()) == 3
     print("selftest ok")
 
 

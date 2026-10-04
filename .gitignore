@@ -4,3 +4,5 @@ data/
 .venv/
 .venv-ml/
 __pycache__/
+device/.pio/
+device/check.exe

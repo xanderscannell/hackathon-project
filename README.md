@@ -17,6 +17,23 @@ python backend.py --selftest
 
 `data/` is gitignored. Expected layout: `data/raw/drives/<drive>_{imu,gps,markers}.csv` and `data/raw/semcog_paser_commute.geojson`.
 
+## Device
+
+ESP32 + BNO085 + GT-U7 GPS + microSD. It finds severe hits and 50 m roughness windows on the board (`device/src/detect.h`, the same math as `pipeline.py`), queues them on the SD card, and uploads the queue over WiFi. Raw IMU and GPS stay on the card in `/drives/`, in the same CSV format as `data/raw/drives`.
+
+```
+cd device && pio run -t upload                 # flash; a retry fixes "serial noise" on board 1
+HOST=0.0.0.0 python backend.py                 # accepts POST /live from the local network
+```
+
+The first boot writes `/config.txt` on the card. Set `ssid`, `pass`, `url=http://<laptop ip>:8000/live`, and `replay=/replay/<drive>` there, or send the same `key=value` lines over serial (115200). To replay a drive, copy `<drive>_imu.csv` and `<drive>_gps.csv` from `data/raw/drives` to `/replay/` on the card, then press BOOT (or send `replay`; `speed=8` is 8x real time). The dashboard's Device view draws what the board uploads. On a replay of a logged drive, it also rings the backend's hits for that drive. Another machine on the network can only post to `/live` and read `/api/`.
+
+```
+python device/check.py     # the device's detector, built for the laptop, against pipeline.py on every drive
+```
+
+`check.py` needs a laptop g++ once: `pio pkg install -g -t platformio/toolchain-gccmingw32`.
+
 ## Model comparison
 
 ```

@@ -157,6 +157,7 @@
   <nav role="tablist" aria-label="Views">
     <button role="tab" id="t-repairs" aria-controls="repairs" aria-selected="true">Repairs</button>
     <button role="tab" id="t-drives" aria-controls="drives" aria-selected="false">Drives</button>
+    <button role="tab" id="t-device" aria-controls="device" aria-selected="false">Device</button>
     <button role="tab" id="t-forecast" aria-controls="forecast" aria-selected="false" hidden>Forecast</button>
     <button role="tab" id="t-brief" aria-controls="brief" aria-selected="false" hidden>Brief</button>
     <button role="tab" id="t-accuracy" aria-controls="accuracy" aria-selected="false">Accuracy</button>
@@ -175,6 +176,7 @@
     <p class="small">Each stretch is 50 m of road. Severe hits are single jolts that stand out from the road around them;
       calibration marks are spots the driver flagged as definite defects.</p>
   </section>
+  <section class="panel" id="device" role="tabpanel" aria-labelledby="t-device" hidden></section>
   <section class="panel" id="forecast" role="tabpanel" aria-labelledby="t-forecast" hidden></section>
   <section class="panel" id="brief" role="tabpanel" aria-labelledby="t-brief" hidden></section>
   <section class="panel" id="accuracy" role="tabpanel" aria-labelledby="t-accuracy" hidden></section>
@@ -203,9 +205,9 @@ const fmtDate = s => new Date(s + 'T12:00').toLocaleDateString('en-US', { month:
 const blade = (name, extra = '') => `<span class="blade${name ? '' : ' unrated'}${extra}">${name ? esc(name) : 'Unrated road'}</span>`;
 const json = url => fetch(url).then(r => r.ok ? r.json() : null).catch(() => null);
 const MI = 1609.34;
-let roughPct, PH, view = 'repairs', mode = 'est', driveLayer, timer;
+let roughPct, PH, INDEX, view = 'repairs', mode = 'est', driveLayer, timer;
 // SEMCOG's lines use the same colors as a drive's estimate, so they start hidden there
-const showRatings = { repairs: true, drives: false, brief: true, accuracy: true };
+const showRatings = { repairs: true, drives: false, device: false, brief: true, accuracy: true };
 
 function mix(a, b, f) {
   const n = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
@@ -232,7 +234,7 @@ function setView(name) {
   document.querySelectorAll('.panel').forEach(p => p.hidden = p.id !== name);
   const want = new Set({
     repairs: ['ratings', 'confirmed', ...(document.getElementById('one-pass')?.checked ? ['suspected'] : [])],
-    drives: ['ratings', 'drive'], forecast: ['risk'], brief: ['ratings', 'confirmed'], accuracy: ['ratings', 'estimated'],
+    drives: ['ratings', 'drive'], device: ['ratings', 'device'], forecast: ['risk'], brief: ['ratings', 'confirmed'], accuracy: ['ratings', 'estimated'],
   }[name]);
   if (!showRatings[name]) want.delete('ratings');
   for (const [k, l] of Object.entries(layers)) want.has(k) ? l.addTo(map) : l.remove();
@@ -240,7 +242,7 @@ function setView(name) {
 }
 // opening a tab frames that tab's data
 function fitView() {
-  const key = { repairs: 'confirmed', brief: 'confirmed', drives: 'drive', forecast: 'risk', accuracy: 'estimated' }[view];
+  const key = { repairs: 'confirmed', brief: 'confirmed', drives: 'drive', device: 'device', forecast: 'risk', accuracy: 'estimated' }[view];
   const items = layers[key]?.getLayers() ?? [];
   if (items.length) map.fitBounds(L.featureGroup(items).getBounds(), { padding: [40, 40] });
 }
@@ -259,6 +261,7 @@ async function init() {
   const [index, segs, sections, ph, fc, brief, models, chat, timelines] = await Promise.all(['index', 'segments',
     'sections', 'potholes', 'forecast', 'brief', 'models', 'webchat', 'timelines'].map(n => json(`data/out/${n}.json`)));
   roughPct = index.rough_pct;
+  INDEX = index;
   document.getElementById('asof').textContent = `${index.drives.length} drives, as of ${fmtDate(ph.as_of)}`;
 
   layers.ratings = L.layerGroup(segs.map(s => L.polyline(s.coords, { color: paserColor(s.paser), weight: 2, opacity: 0.4 })
@@ -272,6 +275,7 @@ async function init() {
 
   renderRepairs(ph, timelines);
   renderDrives(index);
+  renderDevice();
   if (fc) renderForecast(fc, segs);
   if (brief) renderBrief(brief);
   renderAccuracy(index.accuracy, models);
@@ -470,6 +474,83 @@ async function show(id, animate) {
     render(t);
     if (f === 1) clearInterval(timer);
   }, 50);
+}
+
+// The board's own uploads (device/, POST /live): the newest run, drawn as it arrives
+const dev = { lines: 0 };
+function renderDevice() {
+  document.getElementById('device').innerHTML = `<h2>Measured on the device</h2>
+    <p class="lede">Hits and road roughness worked out on the board itself, queued on its SD card and uploaded over WiFi.
+      Its button replays a logged drive from the card through the same detection.</p>
+    <dl class="stats" id="dev-stats"></dl>
+    <p class="small" id="dev-status">Waiting for the first upload.</p>`;
+  layers.device = L.layerGroup();
+  legends.device = () => `<div class="key"><span>Estimated PASER, from the device's roughness</span>
+    <span class="sw"><i style="background:${C.good}"></i>good</span><span class="sw"><i style="background:${C.fair}"></i>fair</span>
+    <span class="sw"><i style="background:${C.poor}"></i>poor</span></div>
+    <div class="key"><span class="sw"><i class="dot" style="background:#fff"></i>severe hit</span>
+      <span class="sw"><i class="dot" style="background:none;border:2px solid ${C.work}"></i>the backend's hit, same drive</span></div>`;
+  setInterval(pollDevice, 1000);
+}
+
+async function pollDevice() {
+  if (view !== 'device' || dev.busy) return;
+  dev.busy = true;
+  const text = await fetch('data/out/live.jsonl', { cache: 'no-store' }).then(r => r.ok ? r.text() : '').catch(() => '');
+  dev.busy = false;
+  const lines = text.split('\n').filter(Boolean);
+  let fresh = lines.slice(dev.lines).map(l => JSON.parse(l));
+  dev.lines = lines.length;
+  const last = fresh.at(-1);
+  if (last && last.run !== dev.run) {  // a new run: only its own events matter
+    fresh = fresh.slice(fresh.findIndex(e => e.run === last.run));
+    await startRun(last);
+  }
+  const [a, b] = INDEX.accuracy.fit;
+  for (const e of fresh) {
+    if (e.k === 'win') {
+      const est = Math.min(Math.max(Math.round(a + b * Math.log(e.rn)), 1), 10);
+      L.polyline(e.path, { color: paserColor(est), weight: 6 }).bindPopup(`Estimated PASER <b>${est}</b><br>
+        roughness ${e.rn} m/s² at 45 mph, driven at ${(e.speed * 2.237).toFixed(0)} mph`).addTo(layers.device);
+      dev.car.setLatLng(e.path.at(-1));
+      dev.wins++;
+    } else {
+      L.circleMarker([e.lat, e.lon], { radius: 3 + Math.min(e.severity, 20) / 4, color: '#1b1b1b', weight: 1, fillColor: '#fff',
+        fillOpacity: 0.9 }).bindPopup(`<b>Severe hit</b>, severity ${e.severity}<br>vertical ${e.vert}, sideways ${e.lat_g} m/s²
+        at ${(e.speed * 2.237).toFixed(0)} mph`).addTo(layers.device);
+      dev.car.setLatLng([e.lat, e.lon]);
+      dev.hits.push(e.t);
+    }
+    dev.t = e.t;
+    dev.rx = e.rx;
+  }
+  if (!dev.run) return;
+  if (fresh.length) {
+    if (!dev.placed) { map.setView(dev.car.getLatLng(), 15); dev.placed = true; }
+    else if (!map.getBounds().contains(dev.car.getLatLng())) map.panTo(dev.car.getLatLng());
+  }
+  // the backend's hits on the same drive appear as the device reaches them
+  for (const h of dev.ref.filter(h => h.t <= dev.t && !h.shown)) {
+    h.shown = true;
+    L.circleMarker([h.lat, h.lon], { radius: 9, color: C.work, weight: 2, fill: false }).addTo(layers.device);
+  }
+  const ref = dev.ref.filter(h => h.shown);
+  const same = ref.filter(h => dev.hits.some(t => Math.abs(t - h.t) < 0.05)).length;
+  document.getElementById('dev-stats').innerHTML = [[(dev.wins * 50 / MI).toFixed(1), 'miles measured'],
+    [dev.hits.length, 'severe hits'], ...(dev.known ? [[`${same} of ${ref.length}`, "the backend's hits, found on the device"]] : [])]
+    .map(([v, k]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('');
+  const age = Math.max(0, Math.round(Date.now() / 1000 - dev.rx));
+  document.getElementById('dev-status').textContent = `${/^drive_\d{8}_\d{6}$/.test(dev.drive) ? driveName(dev.drive) : dev.drive}
+    ${dev.known ? ', replayed from the SD card' : ''}. Last upload ${age < 3 ? 'just now' : `${age} s ago`}.`;
+}
+
+async function startRun(e) {
+  layers.device.clearLayers();
+  Object.assign(dev, { run: e.run, drive: e.drive, wins: 0, hits: [], t: 0, ref: [], placed: false });
+  dev.car = L.marker([0, 0], { icon: L.divIcon({ className: '', html: '<div class="car"></div>', iconSize: [14, 14] }),
+    keyboard: false, zIndexOffset: 1000 }).addTo(layers.device);
+  dev.known = INDEX.drives.includes(e.drive);
+  if (dev.known) dev.ref = (await json(`data/out/${e.drive}.json`))?.hits ?? [];
 }
 
 function renderForecast(fc, segs) {
