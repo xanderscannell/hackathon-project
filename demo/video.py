@@ -57,9 +57,10 @@ SCENES = [
         "Road Desk runs on watsonx Orchestrate. It answers only through tools that call M-TRACE's API "
         "on IBM Code Engine, so every number it says comes from the data, not the model.")),
     dict(id='accuracy', clip='#accuracy', secs=18, say=(
-        "On drives it never saw, the estimated grade lands within one grade of SEMCOG's rating 67% of the time, "
-        "against 56% for always guessing a 6. IBM Granite TSPulse and a 15-feature model didn't beat "
-        "the simple line, and I'd rather show that than hide it.")),
+        "Guessing a 6 every time is within one grade 56% of the time, because most roads are fair. "
+        "But it can't tell a poor road from a good one. On drives it never saw, M-TRACE gets 67%, "
+        "and it never called a good road poor. More rated miles to learn from, and calibration "
+        "for each type of vehicle, will widen that gap.")),
     dict(id='michigan', slide=9, secs=14, say=(
         "Michigan's 83 county road agencies maintain over 90,000 miles of road. The boxes ride on trucks "
         "they already run, get assembled in Michigan, and are calibrated by Michigan's trained PASER raters.")),
@@ -83,7 +84,7 @@ ACTIONS = {
     'repairs': [(4, lambda p: p.click('#r-now-body .row[data-id="175"]')), (15, work_order)],
     'timelines': [(1.5, lambda p: p.click('#r-next')), (6.5, lambda p: p.click('#r-next-body .row[data-id="175"]'))],
     'forecast': [(5, lambda p: p.click('#forecast .row'))],
-    'accuracy': [(7, lambda p: p.evaluate("document.getElementById('accuracy').scrollTo({ top: 420, behavior: 'smooth' })"))],
+    'accuracy': [],  # holds on the rated-vs-estimated grid the narration describes
 }
 
 
@@ -406,7 +407,7 @@ WrapStyle: 0
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Full,Segoe UI Semibold,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H40000000,0,0,0,0,100,100,0,0,3,10,0,2,200,200,10,1
-Style: Map,Segoe UI Semibold,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H40000000,0,0,0,0,100,100,0,0,3,14,0,2,1100,60,56,1
+Style: Map,Segoe UI Semibold,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H40000000,0,0,0,0,100,100,0,0,3,14,0,2,1320,50,56,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
