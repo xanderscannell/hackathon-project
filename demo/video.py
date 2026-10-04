@@ -3,12 +3,14 @@
     python demo/video.py check     # deep links and tab layout -> demo/build/shots/
     python demo/video.py slides    # demo/slides.html -> demo/build/slides/<k>.png and slides.pdf
     python demo/video.py record    # dashboard scenes -> demo/build/clips/<scene>.mp4
+    python demo/video.py build     # slides + clips + footage + voice -> demo/build/m-trace.mp4 and friends
 
 Runs its own backend on 127.0.0.1 and a free port. The browser may only reach
 the backend, the map tiles, Leaflet's CDN and Google Fonts; everything else
 (the IBM web chat included) is aborted.
 """
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -279,8 +281,167 @@ def record():
         b.close()
 
 
+FOOTAGE = {
+    'box': ('The box', 'Film the box on the table while it replays a drive, with the Device view filling in on the laptop.'),
+    'chat': ('Road Desk', 'Screen-record one question in the dashboard\'s web chat, from typing it to the full answer.'),
+}
+CARD = """<!doctype html><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;800&display=swap">
+<style>body{margin:0;width:1920px;height:1080px;background:#24272b;color:#eeede7;font-family:Overpass,sans-serif;
+display:flex;flex-direction:column;justify-content:center;padding:0 160px;box-sizing:border-box;gap:28px}
+p{margin:0}.k{color:#f47b20;font-size:30px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.t{font-size:96px;font-weight:800;line-height:1}.d{font-size:40px;color:#a3a49f;max-width:1400px}
+code{font-size:34px;color:#eeede7;background:#33373c;padding:8px 16px;border-radius:6px}</style>
+<p class="k">Your footage goes here</p><p class="t">{title}</p><p class="d">{what}</p><p><code>demo/footage/{name}.mp4</code></p>"""
+PAD = 0.3  # seconds of quiet before and after each line
+
+
+def duration(path):
+    out = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', str(path)],
+                         capture_output=True, text=True, check=True).stdout
+    return float(out)
+
+
+def find(folder, name, exts):
+    return next((f for e in exts if (f := Path(folder) / f'{name}{e}').exists()), None)
+
+
+def tts(text, wav):
+    """Offline Windows speech, a placeholder until a real take exists."""
+    src = wav.with_suffix('.txt')
+    if wav.exists() and src.exists() and src.read_text(encoding='utf-8') == text:
+        return
+    src.write_text(text, encoding='utf-8')
+    ps = (f"Add-Type -AssemblyName System.Speech; $syn = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+          f"$syn.SetOutputToWaveFile('{wav}'); $syn.Speak([IO.File]::ReadAllText('{src}')); $syn.Dispose()")
+    subprocess.run(['powershell', '-NoProfile', '-Command', ps], check=True)
+
+
+def chunks(text, limit=60):
+    """Caption-sized pieces: one per sentence, long sentences halved near the middle, at a comma if one is close."""
+    def halve(s):
+        if len(s) <= limit:
+            return [s]
+        words = s.split()
+        cut = min(range(1, len(words)), key=lambda i: abs(len(' '.join(words[:i])) - len(s) / 2)
+                  - (12 if words[i - 1].endswith((',', ':')) else 0))
+        return halve(' '.join(words[:cut])) + halve(' '.join(words[cut:]))
+    return [c for sent in re.split(r'(?<=[.?])\s+', text) for c in halve(sent)]
+
+
+def stamp(t):
+    return f'{int(t // 3600)}:{int(t % 3600 // 60):02}:{t % 60:05.2f}'
+
+
+def build(voice='demo/voice', footage='demo/footage'):
+    """The video from SCENES: demo/build/m-trace.mp4, m-trace-loop.mp4 (no sound), narration.md, table.html."""
+    voice, footage = ROOT / voice, ROOT / footage
+    for d in ('seg', 'tts', 'cards'):
+        (BUILD / d).mkdir(parents=True, exist_ok=True)
+    if not all((BUILD / 'slides' / f"{s['slide']}.png").exists() for s in SCENES if 'slide' in s):
+        slides()
+    missing = [s['id'] for s in SCENES if 'clip' in s and not (BUILD / 'clips' / f"{s['id']}.mp4").exists()]
+    if missing:
+        raise SystemExit(f'no clips for {missing}: run python demo/video.py record first')
+
+    events, segs, t, notes = [], [], 0.0, []
+    for i, s in enumerate(SCENES):
+        take = find(voice, s['id'], ('.wav', '.m4a', '.mp3'))
+        if not take:
+            take = BUILD / 'tts' / f"{s['id']}.wav"
+            tts(s['say'], take)
+        # trim the silence a take starts and ends with, and level it
+        clean = BUILD / 'seg' / f"{s['id']}-voice.wav"
+        trim = 'silenceremove=start_periods=1:start_threshold=-45dB'
+        ffmpeg('-i', take, '-af', f'{trim},areverse,{trim},areverse,loudnorm=I=-16:TP=-1.5', '-ar', 48000, '-ac', 2, clean)
+        said = duration(clean)
+        dur = max(s['secs'], said + 2 * PAD)
+        ffmpeg('-i', clean, '-af', f'adelay={int(PAD * 1000)}:all=1,apad', '-t', f'{dur:.3f}', '-ar', 48000, '-ac', 2,
+               BUILD / 'seg' / f"{s['id']}.wav")
+
+        out = BUILD / 'seg' / f"{s['id']}.mp4"
+        fit = 'scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:-1:-1:black,setsar=1'
+        hold = f'tpad=stop_mode=clone:stop_duration={dur:.3f},fps=30,format=yuv420p'
+        if 'slide' in s:
+            src, vf, what = ['-loop', 1, '-i', BUILD / 'slides' / f"{s['slide']}.png"], f'{fit},fps=30,format=yuv420p', f"slide {s['slide']}"
+        elif 'clip' in s:
+            src, vf, what = ['-i', BUILD / 'clips' / f"{s['id']}.mp4"], hold, 'recorded clip'
+        elif (film := find(footage, s['footage'], ('.mp4', '.mov', '.m4v', '.webm'))):
+            src, vf, what = ['-i', film], f'{fit},{hold}', film.name
+        else:
+            card = BUILD / 'cards' / f"{s['footage']}.png"
+            title, desc = FOOTAGE[s['footage']]
+            with browser() as ctx:
+                page = ctx.new_page()
+                page.set_content(CARD.replace('{title}', title).replace('{what}', desc).replace('{name}', s['footage']))
+                page.evaluate('document.fonts.ready')
+                page.wait_for_load_state('networkidle')
+                page.screenshot(path=card)
+            src, vf, what = ['-loop', 1, '-i', card], f'{fit},fps=30,format=yuv420p', 'placeholder card'
+        ffmpeg(*src, '-vf', vf, '-t', f'{dur:.3f}', '-an', '-c:v', 'libx264', '-crf', 18, '-r', 30, out)
+        segs.append(s['id'])
+
+        # captions, each piece on screen for its share of the spoken line
+        style = 'Map' if 'clip' in s else 'Full'
+        pieces, at = chunks(s['say']), t + PAD
+        total = sum(len(c) for c in pieces)
+        for c in pieces:
+            end = at + said * len(c) / total
+            events.append(f'Dialogue: 0,{stamp(at)},{stamp(end)},{style},,0,0,0,,{c}')
+            at = end
+        notes.append((i + 1, s, what, dur, take))
+        print(f"{s['id']}: {dur:.1f} s, voice {'take' if take.parent == voice else 'TTS'} {said:.1f} s, {what}")
+        t += dur
+
+    (BUILD / 'seg' / 'video.txt').write_text(''.join(f"file '{n}.mp4'\n" for n in segs))
+    (BUILD / 'seg' / 'audio.txt').write_text(''.join(f"file '{n}.wav'\n" for n in segs))
+    # map scenes caption over the map, clear of the sidebar and the legend; slides along the very bottom,
+    # under their source lines
+    (BUILD / 'captions.ass').write_text("""[Script Info]
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+WrapStyle: 0
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Full,Segoe UI Semibold,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H40000000,0,0,0,0,100,100,0,0,3,10,0,2,200,200,10,1
+Style: Map,Segoe UI Semibold,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H40000000,0,0,0,0,100,100,0,0,3,14,0,2,1100,60,56,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+""" + '\n'.join(events) + '\n', encoding='utf-8')
+    ffmpeg('-f', 'concat', '-i', 'video.txt', '-c', 'copy', 'video.mp4', cwd=BUILD / 'seg')
+    ffmpeg('-f', 'concat', '-i', 'audio.txt', '-c', 'copy', 'audio.wav', cwd=BUILD / 'seg')
+    # run from the build folder: a drive letter's colon breaks the subtitles filter's path
+    ffmpeg('-i', 'seg/video.mp4', '-i', 'seg/audio.wav', '-vf', 'subtitles=captions.ass', '-c:v', 'libx264', '-crf', 20,
+           '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-shortest', '-movflags', '+faststart', 'm-trace.mp4', cwd=BUILD)
+    ffmpeg('-i', 'm-trace.mp4', '-an', '-c:v', 'copy', 'm-trace-loop.mp4', cwd=BUILD)
+    (BUILD / 'table.html').write_text("""<!doctype html><meta charset="utf-8"><title>M-TRACE</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}video{width:100%;height:100%;object-fit:contain}</style>
+<video src="m-trace-loop.mp4" autoplay muted loop playsinline></video>
+<!-- press F11 for full screen -->
+""")
+    lines = ['# Narration', '',
+             'Read each line in its own take and save it as `demo/voice/<scene>.wav` (or .m4a, .mp3). '
+             'Silence at the start and end is trimmed. A scene stretches to fit a longer take. '
+             f'Then run `python demo/video.py build`. Total now: {t:.0f} s.', '']
+    for n, s, what, dur, take in notes:
+        lines += [f"## {n}. {s['id']}: {what}", '',
+                  f"Save as `demo/voice/{s['id']}.wav`. Now {dur:.1f} s ({'your take' if take.parent == voice else 'synthetic voice'}).",
+                  '', f"> {s['say']}", '']
+    (BUILD / 'narration.md').write_text('\n'.join(lines), encoding='utf-8')
+    print(f'{t:.1f} s -> {BUILD / "m-trace.mp4"}, m-trace-loop.mp4, narration.md, table.html')
+
+
 if __name__ == '__main__':
-    cmds = {'check': check, 'slides': slides, 'record': record}
-    if len(sys.argv) != 2 or sys.argv[1] not in cmds:
-        raise SystemExit(__doc__)
-    cmds[sys.argv[1]]()
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('cmd', choices=['check', 'slides', 'record', 'build'])
+    ap.add_argument('--voice', default='demo/voice', help='folder of takes, <scene>.wav/.m4a/.mp3 (build)')
+    ap.add_argument('--footage', default='demo/footage', help='folder of box.mp4 and chat.mp4 (build)')
+    a = ap.parse_args()
+    if a.cmd == 'build':
+        build(a.voice, a.footage)
+    else:
+        {'check': check, 'slides': slides, 'record': record}[a.cmd]()
