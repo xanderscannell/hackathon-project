@@ -1,6 +1,7 @@
 """Demo tooling: drive the dashboard headless.
 
     python demo/video.py check     # deep links and tab layout -> demo/build/shots/
+    python demo/video.py slides    # demo/slides.html -> demo/build/slides/<k>.png and slides.pdf
 
 Runs its own backend on 127.0.0.1 and a free port. The browser may only reach
 the backend, the map tiles, Leaflet's CDN and Google Fonts; everything else
@@ -48,12 +49,17 @@ def backend():
         proc.wait()
 
 
+def allowed(url):
+    u = urlparse(url)
+    return u.scheme in ('file', 'data', 'blob') or u.hostname in ALLOW
+
+
 @contextmanager
 def browser(**ctx):
     with sync_playwright() as p:
         b = p.chromium.launch()
         c = b.new_context(viewport=HD, **ctx)
-        c.route('**/*', lambda r: r.continue_() if urlparse(r.request.url).hostname in ALLOW else r.abort())
+        c.route('**/*', lambda r: r.continue_() if allowed(r.request.url) else r.abort())
         try:
             yield c
         finally:
@@ -138,8 +144,37 @@ def check():
     sys.exit(1 if fails else 0)
 
 
+def slides():
+    """Each slide to demo/build/slides/<k>.png, the deck to demo/build/slides.pdf."""
+    out = BUILD / 'slides'
+    out.mkdir(parents=True, exist_ok=True)
+    deck = (ROOT / 'demo' / 'slides.html').as_uri()
+    fails = []
+    with browser() as ctx:
+        page = ctx.new_page()
+        page.goto(deck)
+        n = page.locator('.slide').count()
+        for k in range(1, n + 1):
+            page.goto('about:blank')
+            page.goto(f'{deck}?n={k}')
+            page.evaluate('document.fonts.ready')
+            page.wait_for_load_state('networkidle')
+            over = page.evaluate("""() => { const s = document.querySelector('.slide.on');
+              return s.scrollHeight > s.clientHeight || s.scrollWidth > s.clientWidth; }""")
+            if over:
+                fails.append(k)
+            page.screenshot(path=out / f'{k}.png')
+        page.goto(deck)
+        page.evaluate('document.fonts.ready')
+        page.wait_for_load_state('networkidle')
+        page.pdf(path=BUILD / 'slides.pdf', width='1920px', height='1080px', print_background=True)
+    print(f'{n} slides -> {out}, {BUILD / "slides.pdf"}')
+    if fails:
+        raise SystemExit(f'content overflows on slide {fails}')
+
+
 if __name__ == '__main__':
-    cmds = {'check': check}
+    cmds = {'check': check, 'slides': slides}
     if len(sys.argv) != 2 or sys.argv[1] not in cmds:
         raise SystemExit(__doc__)
     cmds[sys.argv[1]]()

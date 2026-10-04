@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M-TRACE slides</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap">
+<style>
+  /* the dashboard's palette: Michigan road signage, each color has one job */
+  :root {
+    --asphalt: #24272b; --shoulder: #33373c; --seam: #43474d; --paint: #eeede7; --faded: #a3a49f;
+    --work: #f47b20; --blade: #0f6b4a; --good: #3fa35b; --fair: #edbe2e; --poor: #de4a3c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #161819; color: var(--paint);
+    font: 36px/1.35 Overpass, system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+  h1, h2, h3, p, ul, ol { margin: 0; }
+
+  /* every slide is drawn at 1920x1080 and scaled to the window */
+  #deck { position: fixed; left: 50%; top: 50%; width: 1920px; height: 1080px; transform-origin: 0 0; }
+  .slide { position: absolute; inset: 0; overflow: hidden; background: var(--asphalt); padding: 96px 130px 80px;
+    display: flex; flex-direction: column; gap: 48px; }
+  .slide:not(.on) { visibility: hidden; }
+  .slide h2 { font-size: 76px; font-weight: 800; line-height: 1.05; letter-spacing: -0.015em; text-wrap: balance; }
+  .nw { white-space: nowrap; }
+  .kicker { color: var(--work); font-size: 30px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+  .faded { color: var(--faded); }
+  b, strong { font-weight: 800; }
+  .src { margin-top: auto; color: var(--faded); font-size: 22px; line-height: 1.4; }
+  .num { position: absolute; right: 60px; bottom: 44px; color: var(--seam); font-size: 24px; font-weight: 600; }
+  .blade { display: inline-block; background: var(--blade); color: #fff; font-weight: 600; padding: 4px 18px 0;
+    border-radius: 8px; box-shadow: inset 0 0 0 3px #fff; }
+  .row { display: flex; gap: 56px; }
+  .grow { flex: 1; min-width: 0; }
+
+  /* the orange diamond: work-zone sign */
+  .diamond { width: 300px; height: 300px; position: relative; flex: none; display: grid; place-items: center; }
+  .diamond::before { content: ''; position: absolute; inset: 44px; background: var(--work); border-radius: 18px; transform: rotate(45deg);
+    box-shadow: inset 0 0 0 7px var(--work), inset 0 0 0 12px #1b1b1b; }
+  .diamond span { position: relative; color: #1b1b1b; font-weight: 800; text-align: center; line-height: 0.9; }
+
+  /* title */
+  .title { justify-content: center; gap: 36px; }
+  .title h1 { font-size: 200px; font-weight: 800; line-height: 0.9; letter-spacing: -0.03em; }
+  .title .long { font-size: 40px; color: var(--faded); }
+  .title .tag { font-size: 58px; font-weight: 600; max-width: 1400px; }
+
+  /* stat tiles */
+  .stats { display: grid; gap: 40px 60px; }
+  .stat b { display: block; font-size: 120px; line-height: 1; letter-spacing: -0.02em; }
+  .stat span { display: block; color: var(--faded); font-size: 32px; margin-top: 10px; }
+  .stat.work b { color: var(--work); }
+
+  /* comparison bars */
+  .bars { display: flex; flex-direction: column; gap: 22px; }
+  .bar { display: grid; grid-template-columns: 1fr 140px; align-items: center; gap: 8px 28px; }
+  .bar p { grid-column: span 2; font-size: 30px; color: var(--faded); }
+  .bar i { display: block; height: 34px; background: var(--shoulder); border-radius: 4px; overflow: hidden; }
+  .bar i::after { content: ''; display: block; height: 100%; width: var(--w); background: var(--c, var(--faded)); }
+  .bar b { font-size: 56px; text-align: right; line-height: 1; }
+  .panel { background: var(--shoulder); border-radius: 10px; padding: 44px 48px; }
+  .panel h3 { font-size: 40px; font-weight: 800; margin-bottom: 26px; }
+
+  /* steps and cards */
+  .cards { display: grid; gap: 40px; }
+  .card { background: var(--shoulder); border-radius: 10px; padding: 40px 44px; border-top: 8px solid var(--work); }
+  .card h3 { font-size: 42px; font-weight: 800; margin-bottom: 18px; line-height: 1.1; }
+  .card p { font-size: 31px; color: var(--faded); }
+  .card p b { color: var(--paint); font-weight: 600; }
+
+  /* flow diagram */
+  .flow { display: flex; align-items: stretch; gap: 0; }
+  .node { background: var(--shoulder); border-radius: 10px; padding: 32px 34px; flex: 1; }
+  .node h3 { font-size: 38px; font-weight: 800; margin-bottom: 12px; }
+  .node p { font-size: 28px; color: var(--faded); }
+  .node.ibm { border: 3px solid #4589ff; }
+  .node.ibm h3 { color: #a6c8ff; }
+  .arrow { flex: none; width: 74px; display: grid; place-items: center; color: var(--work); font-size: 56px; font-weight: 800; }
+
+  .quote { font-size: 40px; line-height: 1.4; border-left: 8px solid var(--work); padding-left: 40px; }
+  .facts { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 30px; }
+  .facts li { font-size: 36px; }
+  .facts li b { color: var(--work); }
+
+  #box-photo { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; display: block; }
+  .photo { width: 820px; height: 640px; flex: none; }
+  .photo:has(img) svg { display: none; }
+
+  @media print {
+    @page { size: 1920px 1080px; margin: 0; }
+    html, body { background: var(--asphalt); height: auto; }
+    #deck { position: static; transform: none !important; }
+    .slide { position: relative; width: 1920px; height: 1080px; break-after: page; visibility: visible !important; }
+  }
+</style>
+</head>
+<body>
+<div id="deck">
+
+<section class="slide title">
+  <div class="row" style="align-items:center;gap:40px">
+    <svg width="230" height="230" viewBox="0 0 44 44" aria-hidden="true">
+      <rect x="7" y="7" width="30" height="30" rx="3" transform="rotate(45 22 22)" fill="#f47b20"/>
+      <rect x="9.5" y="9.5" width="25" height="25" rx="2" transform="rotate(45 22 22)" fill="none" stroke="#1b1b1b" stroke-width="1.6"/>
+      <path d="M12 25 h6 q4 6 8 0 h6" fill="none" stroke="#1b1b1b" stroke-width="2.6" stroke-linecap="round"/>
+    </svg>
+    <div>
+      <h1>M-TRACE</h1>
+      <p class="long">Michigan Transportation Roadway Assessment and Condition Evaluation</p>
+    </div>
+  </div>
+  <p class="tag">Every fleet vehicle becomes a road inspector.</p>
+</section>
+
+<section class="slide">
+  <p class="kicker">The problem</p>
+  <div class="row" style="align-items:center;gap:80px">
+    <div class="diamond" style="width:360px;height:360px"><span style="font-size:110px">30<br><span style="font-size:52px">DAYS</span></span></div>
+    <div class="grow">
+      <p class="quote">Michigan law: once a road defect has been <b>readily apparent for 30 days</b>, the agency is conclusively presumed to know about it.</p>
+    </div>
+  </div>
+  <ul class="facts">
+    <li>Federal-aid roads get a PASER rating <b>once every two years</b>.</li>
+    <li>Local roads don't have to be rated at all: about <b>6%</b> of their lane miles had PASER data in 2017.</li>
+    <li>Rough roads cost the average Michigan driver <b>$772 a year</b> in vehicle costs.</li>
+  </ul>
+  <p class="src">MCL 691.1403. City of Rochester, PASER information. Mackinac Center, 2018 (TAMC data). TRIP, Keeping Michigan Mobile, Aug 2025.</p>
+</section>
+
+<section class="slide">
+  <p class="kicker">The idea</p>
+  <h2>Fleet vehicles already drive every road, every week.<br>Make those trips measure the road.</h2>
+  <div class="cards" style="grid-template-columns:repeat(3,1fr)">
+    <div class="card"><h3>Measure</h3><p>Roughness over every <b>50 m</b> of road, and every severe hit, matched to the PASER segment it was on.</p></div>
+    <div class="card"><h3>Confirm</h3><p>A hit becomes a pothole once it's found on <b>two or more passes</b>. One jolt could be a manhole cover.</p></div>
+    <div class="card"><h3>Act</h3><p>A <b>30-day clock</b> per pothole, a work order in one click, and the fair roads to seal before they turn poor.</p></div>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="kicker">The box</p>
+  <div class="row" style="align-items:center;flex:1">
+    <div class="photo">
+      <img id="box-photo" src="footage/box.jpg" alt="The M-TRACE box" onerror="this.remove()">
+      <svg viewBox="0 0 820 640" width="820" height="640" role="img" aria-label="ESP32 wired to a motion sensor, GPS and SD card">
+        <g font-family="Overpass, system-ui, sans-serif" text-anchor="middle">
+          <g stroke="#f47b20" stroke-width="5"><line x1="410" y1="320" x2="140" y2="110"/><line x1="410" y1="320" x2="680" y2="110"/>
+            <line x1="410" y1="320" x2="140" y2="530"/><line x1="410" y1="320" x2="680" y2="530"/></g>
+          <rect x="285" y="245" width="250" height="150" rx="12" fill="#f47b20"/>
+          <text x="410" y="317" font-size="44" font-weight="800" fill="#1b1b1b">ESP32</text>
+          <text x="410" y="357" font-size="26" fill="#1b1b1b">detects on board</text>
+          <g fill="#33373c" stroke="#43474d" stroke-width="3">
+            <rect x="10" y="50" width="260" height="120" rx="12"/><rect x="550" y="50" width="260" height="120" rx="12"/>
+            <rect x="10" y="470" width="260" height="120" rx="12"/><rect x="550" y="470" width="260" height="120" rx="12"/></g>
+          <g fill="#eeede7" font-size="34" font-weight="800">
+            <text x="140" y="105">BNO085</text><text x="680" y="105">GT-U7 GPS</text>
+            <text x="140" y="525">microSD</text><text x="680" y="525">WiFi</text></g>
+          <g fill="#a3a49f" font-size="24">
+            <text x="140" y="143">motion, 100 Hz</text><text x="680" y="143">position, 5 Hz</text>
+            <text x="140" y="563">queue + raw drives</text><text x="680" y="563">uploads when it can</text></g>
+        </g>
+      </svg>
+    </div>
+    <div class="grow">
+      <ul class="facts">
+        <li>ESP32, BNO085 motion sensor, GT-U7 GPS and a microSD card.</li>
+        <li>Finds roughness and severe hits <b>on the board</b>.</li>
+        <li>Keeps everything on the SD card, uploads over WiFi. Nothing is lost offline.</li>
+        <li>About <b>$100 in parts</b>, estimated at <span class="nw">single-unit</span> retail prices.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="kicker">How it works</p>
+  <h2>Measured on the road, checked by rules, answered by IBM watsonx.</h2>
+  <div class="flow">
+    <div class="node"><h3>Box</h3><p>Roughness per 50 m and severe hits, posted over WiFi</p></div>
+    <div class="arrow">&rarr;</div>
+    <div class="node"><h3>M-TRACE</h3><p>Speed correction, PASER match, pothole lifecycle, 30-day clock, forecast</p></div>
+    <div class="arrow">&rarr;</div>
+    <div class="node"><h3>Dashboard</h3><p>Repairs, drives, device, forecast, accuracy, work orders</p></div>
+  </div>
+  <div class="flow">
+    <div class="node ibm"><h3>Code Engine</h3><p>Read-only API over the computed data</p></div>
+    <div class="arrow">&rarr;</div>
+    <div class="node ibm"><h3>watsonx Orchestrate</h3><p>Road Desk agent: every answer comes from a tool call</p></div>
+    <div class="arrow">+</div>
+    <div class="node ibm"><h3>Granite 4</h3><p>Weekly brief, checked number by number against the record</p></div>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="kicker">One car, Sep 27 to Oct 3</p>
+  <div class="stats" style="grid-template-columns:repeat(3,1fr)">
+    <div class="stat"><b>179</b><span>miles measured over 11 drives</span></div>
+    <div class="stat work"><b>158</b><span>potholes confirmed on 2+ passes</span></div>
+    <div class="stat"><b>414</b><span>single hits waiting for a second pass</span></div>
+  </div>
+  <div class="row" style="gap:40px">
+    <div class="panel grow"><h3>The box agrees with the backend</h3>
+      <p class="faded">Every drive replayed through the device's own detection code: <b style="color:var(--paint)">799 of 799</b> hits and
+        <b style="color:var(--paint)">5,758 of 5,758</b> roughness windows match.</p></div>
+    <div class="panel grow"><h3>Roads nobody rates</h3>
+      <p class="faded"><b style="color:var(--paint)">7.9 miles</b> had no PASER rating. They get an estimated grade from roughness.</p></div>
+  </div>
+  <p class="src">One test vehicle in southeast Michigan.</p>
+</section>
+
+<section class="slide">
+  <p class="kicker">Honest numbers</p>
+  <h2>Scored only on roads and years the models never saw.</h2>
+  <div class="row" style="gap:40px">
+    <div class="panel grow"><h3>Estimated PASER, within one grade</h3>
+      <div class="bars">
+        <div class="bar"><p>Roughness line, on 151 sections it never saw</p><i style="--w:66.9%;--c:var(--work)"></i><b>67%</b></div>
+        <div class="bar"><p>Always guessing a 6</p><i style="--w:55.6%"></i><b>56%</b></div>
+      </div></div>
+    <div class="panel grow"><h3>Roads that fall to poor</h3>
+      <div class="bars">
+        <div class="bar"><p>The riskiest tenth it flagged, poor by 2024</p><i style="--w:51.3%;--c:var(--poor)"></i><b>51%</b></div>
+        <div class="bar"><p>All fair and good miles</p><i style="--w:21.3%"></i><b>21%</b></div>
+      </div></div>
+  </div>
+  <p class="src">Forecast backtested on SEMCOG's own PASER history across 748 miles: trained on ratings through 2020, scored on the real 2024 ratings.
+    IBM Granite TSPulse (62%) and a 15-feature model (64%) didn't beat the simple roughness line, and we say so.</p>
+</section>
+
+<section class="slide">
+  <p class="kicker">IBM</p>
+  <h2>The language model never makes up a number.</h2>
+  <div class="cards" style="grid-template-columns:repeat(3,1fr)">
+    <div class="card" style="border-top-color:#4589ff"><h3>Road Desk on watsonx Orchestrate</h3>
+      <p>Staff ask in plain English. The agent answers only through <b>seven tools</b> that call <span class="nw">M-TRACE's</span> read-only API on <b>IBM Code Engine</b>.</p></div>
+    <div class="card" style="border-top-color:#4589ff"><h3>Weekly brief by Granite 4</h3>
+      <p>An Orchestrate flow writes the brief from the computed facts. <b>Any draft with a number not in the record is thrown out.</b></p></div>
+    <div class="card" style="border-top-color:#4589ff"><h3>Granite TSPulse and TTM, tested</h3>
+      <p>Both scored on held-out data next to simple baselines. Both carry real signal; <b>neither beat the simpler models here</b>.</p></div>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="kicker">Michigan impact</p>
+  <h2>Built for Michigan's road agencies.</h2>
+  <div class="cards" style="grid-template-columns:repeat(2,1fr);gap:36px">
+    <div class="card"><h3>Who buys it</h3><p>Michigan's <b>83 county road agencies</b>, which maintain <b>90,484 miles</b>, 75% of the state's roads, and its cities. Priced per vehicle per year.</p></div>
+    <div class="card"><h3>Who rides</h3><p>Boxes go on <b>trucks the agency already runs</b>. Coverage grows with every vehicle, not with staff. About $100 in parts each.</p></div>
+    <div class="card"><h3>Michigan jobs</h3><p>Boxes <b>assembled in Michigan</b>. Calibration by Michigan's PASER raters, trained by <b>Michigan Tech's</b> Center for Technology and Training.</p></div>
+    <div class="card"><h3>Money it saves</h3><p>Rebuilding a road costs <b>5 to 8 times</b> more per lane mile than preventive work. Knowing which fair roads are slipping is how a fixed budget goes further.</p></div>
+  </div>
+  <p class="src">County Road Association of Michigan. Michigan Tech CTT. Public Sector Consultants 2023, via TRIP, Aug 2025. Parts cost: estimated from single-unit retail prices.</p>
+</section>
+
+<section class="slide title">
+  <p class="kicker">What's next</p>
+  <ul class="facts" style="gap:36px">
+    <li>Boxes in <b>several fleet vehicles</b>, so passes add up faster.</li>
+    <li>A <b>season of data</b>, to watch roads change over months instead of one week.</li>
+    <li>Check it against a county's own <b>repair records</b>.</li>
+  </ul>
+  <div class="row" style="align-items:center;gap:36px;margin-top:40px">
+    <svg width="120" height="120" viewBox="0 0 44 44" aria-hidden="true">
+      <rect x="7" y="7" width="30" height="30" rx="3" transform="rotate(45 22 22)" fill="#f47b20"/>
+      <rect x="9.5" y="9.5" width="25" height="25" rx="2" transform="rotate(45 22 22)" fill="none" stroke="#1b1b1b" stroke-width="1.6"/>
+      <path d="M12 25 h6 q4 6 8 0 h6" fill="none" stroke="#1b1b1b" stroke-width="2.6" stroke-linecap="round"/>
+    </svg>
+    <div><p style="font-size:64px;font-weight:800;line-height:1">M-TRACE</p>
+      <p class="faded" style="font-size:32px">github.com/xanderscannell/hackathon-project</p></div>
+  </div>
+</section>
+
+</div>
+<script>
+const slides = [...document.querySelectorAll('.slide')];
+slides.forEach((s, i) => s.insertAdjacentHTML('beforeend', `<span class="num">${i + 1} / ${slides.length}</span>`));
+let at = Math.min(Math.max(+new URLSearchParams(location.search).get('n') || +location.hash.slice(1) || 1, 1), slides.length) - 1;
+function go(i) {
+  at = Math.min(Math.max(i, 0), slides.length - 1);
+  slides.forEach((s, k) => s.classList.toggle('on', k === at));
+  history.replaceState(null, '', `#${at + 1}`);
+}
+function fit() {
+  const k = Math.min(innerWidth / 1920, innerHeight / 1080);
+  document.getElementById('deck').style.transform = `scale(${k}) translate(-50%, -50%)`;
+}
+addEventListener('resize', fit);
+addEventListener('keydown', e => {
+  if (['ArrowRight', 'PageDown', ' '].includes(e.key)) go(at + 1);
+  if (['ArrowLeft', 'PageUp'].includes(e.key)) go(at - 1);
+  if (e.key === 'Home') go(0);
+  if (e.key === 'End') go(slides.length - 1);
+});
+addEventListener('click', e => go(at + (e.clientX < innerWidth / 3 ? -1 : 1)));
+fit();
+go(at);
+</script>
+</body>
+</html>
