@@ -520,6 +520,7 @@ async function pollDevice() {
   const text = await fetch('data/out/live.jsonl', { cache: 'no-store' }).then(r => r.ok ? r.text() : '').catch(() => '');
   dev.busy = false;
   const lines = text.split('\n').filter(Boolean);
+  if (lines.length < dev.lines) dev.lines = 0;  // live.jsonl was cleared (a demo reset): read it from the top
   let fresh = lines.slice(dev.lines).map(l => JSON.parse(l));
   dev.lines = lines.length;
   const last = fresh.at(-1);
