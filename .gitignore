@@ -6,3 +6,4 @@ data/
 __pycache__/
 device/.pio/
 device/check.exe
+demo/script.md
