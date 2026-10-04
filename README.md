@@ -19,7 +19,7 @@ python backend.py --selftest
 
 ## Device
 
-ESP32 + BNO085 + GT-U7 GPS + microSD. It finds severe hits and 50 m roughness windows on the board (`device/src/detect.h`, the same math as `pipeline.py`), queues them on the SD card, and uploads the queue over WiFi. Raw IMU and GPS stay on the card in `/drives/`, in the same CSV format as `data/raw/drives`.
+ESP32 + BNO085 + GT-U7 GPS + microSD. Wiring (`device/src/main.cpp`): BNO085 on I2C (SDA 21, SCL 22), GPS TX to GPIO 16 and RX to 17, SD on SPI (SCK 18, MISO 19, MOSI 23, CS 5). It finds severe hits and 50 m roughness windows on the board (`device/src/detect.h`, the same math as `pipeline.py`), queues them on the SD card, and uploads the queue over WiFi. Raw IMU and GPS stay on the card in `/drives/`, in the same CSV format as `data/raw/drives`.
 
 ```
 cd device && pio run -t upload                 # flash; a retry fixes "serial noise" on board 1
