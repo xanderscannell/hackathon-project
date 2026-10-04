@@ -213,21 +213,23 @@
 
 <section class="slide">
   <p class="kicker">Honest numbers</p>
-  <h2>Scored only on roads and years the models never saw.</h2>
+  <h2>Scored only on roads and years it never saw.</h2>
   <div class="row" style="gap:40px">
     <div class="panel grow"><h3>Estimated PASER, within one grade</h3>
       <div class="bars">
         <div class="bar"><p>Roughness line, on 151 sections it never saw</p><i style="--w:66.9%;--c:var(--work)"></i><b>67%</b></div>
         <div class="bar"><p>Always guessing a 6</p><i style="--w:55.6%"></i><b>56%</b></div>
-      </div></div>
+      </div>
+      <p class="faded" style="font-size:28px;margin-top:26px">Guessing scores only because most roads are fair. It can't tell a poor
+        road from a good one; M-TRACE never called a good road poor.</p></div>
     <div class="panel grow"><h3>Roads that fall to poor</h3>
       <div class="bars">
         <div class="bar"><p>The riskiest tenth it flagged, poor by 2024</p><i style="--w:51.3%;--c:var(--poor)"></i><b>51%</b></div>
         <div class="bar"><p>All fair and good miles</p><i style="--w:21.3%"></i><b>21%</b></div>
       </div></div>
   </div>
-  <p class="src">Forecast backtested on SEMCOG's own PASER history across 748 miles: trained on ratings through 2020, scored on the real 2024 ratings.
-    IBM Granite TSPulse (62%) and a 15-feature model (64%) didn't beat the simple roughness line, and we say so.</p>
+  <p class="src">84 of the 151 sections are rated fair, and none of the 31 rated good was estimated poor.
+    Forecast backtested on SEMCOG's own PASER history across 748 miles: trained on ratings through 2020, scored on the real 2024 ratings.</p>
 </section>
 
 <section class="slide">
