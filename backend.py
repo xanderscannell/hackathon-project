@@ -164,6 +164,15 @@ def ingest(body):
     return {"stored": len(new), "skipped": bad}
 
 
+def clear_live():
+    """Start the Device view over between demos: the box's uploads are only demo replays."""
+    global live_seen
+    with live_lock:
+        LIVE.unlink(missing_ok=True)
+        live_seen = None
+    return {"cleared": True}
+
+
 API = {"/api/potholes": potholes, "/api/road": road, "/api/work_order": work_order, "/api/summary": summary,
        "/api/at_risk": at_risk}
 
@@ -187,8 +196,11 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
+        path = urlparse(self.path).path
+        if path == "/live/clear" and not self.public():  # the dashboard's reset button, from this machine only
+            return self.reply(clear_live(), 200)
         # the device's uploads: local network only, never through the tunnel or on Code Engine
-        if API_ONLY or self.headers.get("Cf-Connecting-Ip") or urlparse(self.path).path != "/live":
+        if API_ONLY or self.headers.get("Cf-Connecting-Ip") or path != "/live":
             return self.send_error(404)
         n = int(self.headers.get("Content-Length") or 0)
         if not 0 < n <= 1 << 20:
@@ -232,6 +244,8 @@ def selftest():
     live_seen = None  # after a restart, what is stored is still known
     assert ingest('{"run":1,"n":1}\n{"run":2,"n":1}') == {"stored": 1, "skipped": 0}
     assert len(LIVE.read_text().splitlines()) == 3
+    assert clear_live() == {"cleared": True} and not LIVE.exists()
+    assert ingest('{"run":1,"n":0}') == {"stored": 1, "skipped": 0}  # a replay after a reset is drawn again
     print("selftest ok")
 
 

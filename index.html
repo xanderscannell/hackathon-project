@@ -81,6 +81,8 @@
   .seg { display: inline-flex; border: 1px solid var(--seam); border-radius: 4px; overflow: hidden; }
   .seg button { background: none; border: 0; padding: 6px 12px 4px; color: var(--faded); cursor: pointer; }
   .seg button[aria-pressed="true"] { background: var(--shoulder); color: var(--paint); }
+  .quiet { background: none; border: 1px solid var(--seam); border-radius: 4px; padding: 5px 12px 3px; color: var(--faded); cursor: pointer; margin-top: 14px; }
+  .quiet:hover { color: var(--paint); }
   label.check { display: flex; gap: 8px; align-items: center; color: var(--faded); font-size: 13px; cursor: pointer; }
   dl.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; margin-bottom: 0; }
   dl.stats dd { margin: 0; font-size: 26px; font-weight: 800; line-height: 1; }
@@ -508,7 +510,16 @@ function renderDevice() {
     <p class="lede">Hits and road roughness worked out on the board itself, queued on its SD card and uploaded over WiFi.
       Its button replays a logged drive from the card through the same detection.</p>
     <dl class="stats" id="dev-stats"></dl>
-    <p class="small" id="dev-status">Waiting for the first upload.</p>`;
+    <p class="small" id="dev-status">Waiting for the first upload.</p>
+    <button class="quiet" id="dev-clear">Clear for the next demo</button>`;
+  document.getElementById('dev-clear').onclick = async () => {
+    const r = await fetch('live/clear', { method: 'POST' }).catch(() => null);
+    if (!r?.ok) return document.getElementById('dev-status').textContent = "Couldn't clear: is the backend running?";
+    layers.device.clearLayers();
+    Object.assign(dev, { lines: 0, run: undefined, epoch: (dev.epoch || 0) + 1 });
+    document.getElementById('dev-stats').innerHTML = '';
+    document.getElementById('dev-status').textContent = 'Waiting for the first upload.';
+  };
   layers.device = L.layerGroup();
   legends.device = () => `<div class="key"><span>Estimated PASER, from the device's roughness</span>
     <span class="sw"><i style="background:${C.good}"></i>good</span><span class="sw"><i style="background:${C.fair}"></i>fair</span>
@@ -521,8 +532,10 @@ function renderDevice() {
 async function pollDevice() {
   if (view !== 'device' || dev.busy) return;
   dev.busy = true;
+  const epoch = dev.epoch;
   const text = await fetch('data/out/live.jsonl', { cache: 'no-store' }).then(r => r.ok ? r.text() : '').catch(() => '');
   dev.busy = false;
+  if (epoch !== dev.epoch) return;  // cleared while this was loading: it holds the old run
   const lines = text.split('\n').filter(Boolean);
   if (lines.length < dev.lines) dev.lines = 0;  // live.jsonl was cleared (a demo reset): read it from the top
   let fresh = lines.slice(dev.lines).map(l => JSON.parse(l));
