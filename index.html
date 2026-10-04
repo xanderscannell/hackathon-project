@@ -521,7 +521,7 @@ async function pollDevice() {
       dev.car.setLatLng([e.lat, e.lon]);
       dev.hits.push(e.t);
     }
-    dev.t = e.t;
+    dev.t = Math.max(dev.t, e.t);  // a window arrives when it closes, stamped with when it started
     dev.rx = e.rx;
   }
   if (!dev.run) return;
