@@ -78,6 +78,6 @@ python, numpy, pandas, scikit-learn, leaflet, ibm-watsonx-orchestrate, ibm-grani
 
 ## Try it out
 
-https://github.com/xanderscannell/hackathon-project
+https://github.com/xanderscannell/m-trace
 
 Video: https://youtu.be/J80AxYNAM8M

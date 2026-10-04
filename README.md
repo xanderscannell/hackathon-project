@@ -85,7 +85,7 @@ From 11 drives covering 179 miles in southeast Michigan, Sep 27 to Oct 3:
 | **51%** vs 21% | Backtested on SEMCOG's own history: of the fair and good miles the forecast flagged as riskiest in 2020, 51% were rated poor by 2024, against 21% of all fair and good miles. |
 | **799 of 799** hits | The device's on-board detection matches the backend exactly on every drive, along with all 5,758 roughness windows. |
 
-Every model is scored on data it never trained on, next to a simple baseline.
+Every model is scored on data it never trained on, next to a simple baseline. [How each number is calculated](docs/methods.md).
 
 ## What's in the box
 
@@ -119,7 +119,9 @@ Single-unit retail prices, an estimate; fleet volume would be lower. Each part's
 
 ### What didn't win, and why that's in here
 
-A simple roughness line beat the more complex models at turning roughness into a PASER grade: Granite TSPulse reached 62% within one grade and a 15-feature ridge regression 64%, against the line's 67%. For forecasting, gradient boosting on rating history, road class, surface and lanes (62%) beat Granite TTM, which only sees the rating history (57% zero-shot, 56% fine-tuned). Saying which approach didn't win is part of the result.
+A simple roughness line beat the more complex models at turning roughness into a PASER grade: Granite TSPulse reached 62% within one grade and a 15-feature ridge regression 64%, against the line's 67%. With only 182 training sections, the extra features mostly fit noise, and TSPulse reads the shape of the vibration but not its size, which is what separates poor roads from good ones. For forecasting, gradient boosting on rating history, road class, surface and lanes (62%) beat Granite TTM (57% zero-shot, 56% fine-tuned), which sees only one road's short, gappy rating history and can't learn from similar roads.
+
+Every approach was scored on the same held-out data, next to the same baseline. Reporting the ones that lost is how you can trust the one that won. **[How M-TRACE works](docs/methods.md)** is a quick plain-language rundown of the algorithms behind these results.
 
 ## What's next
 
@@ -134,7 +136,7 @@ python pipeline.py      # raw drives + SEMCOG PASER segments -> data/out/*.json
 python backend.py       # dashboard and API at http://localhost:8000
 ```
 
-The [developer guide](docs/developers.md) covers the device firmware, the models and forecast, the IBM deployment, and the demo build. [Architecture](demo/architecture.md) explains how the pieces fit.
+[How M-TRACE works](docs/methods.md) explains the algorithms in plain language. The [developer guide](docs/developers.md) covers the device firmware, the models and forecast, the IBM deployment, and the demo build. [Architecture](demo/architecture.md) explains how the pieces fit.
 
 ## Sources and credits
 
