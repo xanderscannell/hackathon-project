@@ -36,8 +36,8 @@
   .brand { display: flex; gap: 14px; align-items: center; padding: 20px 22px 14px; }
   .brand h1 { font-size: 26px; font-weight: 800; line-height: 1; letter-spacing: -0.01em; }
   .brand p { color: var(--faded); font-size: 13px; margin-top: 4px; }
-  nav { display: flex; gap: 2px; padding: 0 14px; border-bottom: 1px solid var(--seam); overflow-x: auto; }
-  nav button { background: none; border: 0; padding: 10px 8px 8px; color: var(--faded); font-weight: 600;
+  nav { display: flex; padding: 0 10px; border-bottom: 1px solid var(--seam); overflow-x: auto; }
+  nav button { background: none; border: 0; padding: 10px 6px 8px; color: var(--faded); font-weight: 600;
     border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; }
   nav button[aria-selected="true"] { color: var(--paint); border-bottom-color: var(--work); }
   nav button:hover { color: var(--paint); }
@@ -137,7 +137,7 @@
     #app { grid-template-columns: 1fr; grid-template-rows: 52vh 1fr; height: auto; }
     #map { height: 52vh; grid-row: 1; }
     #side { grid-row: 2; height: auto; min-height: 48vh; border-right: 0; border-top: 1px solid var(--seam); }
-    #legend { left: 16px; bottom: auto; top: calc(52vh - 16px); transform: translateY(-100%); }
+    #legend { position: absolute; left: 16px; bottom: auto; top: calc(52vh - 16px); transform: translateY(-100%); }
     .brand { padding: 14px 16px 10px; }
     .panel { padding: 14px 16px 24px; }
   }
@@ -280,7 +280,12 @@ async function init() {
   if (brief) renderBrief(brief);
   renderAccuracy(index.accuracy, models);
   if (chat) loadChat(chat);
-  document.querySelectorAll('nav button').forEach(b => b.onclick = () => { setView(b.getAttribute('aria-controls')); fitView(); });
+  // tabs set the URL hash and the hash picks the view, so links and the back button work
+  document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+    const h = `#${b.getAttribute('aria-controls')}`;
+    if (location.hash === h) route(); else location.hash = h;
+  });
+  window.onhashchange = route;
   // arrow keys move between tabs
   document.querySelector('nav').onkeydown = e => {
     const tabs = [...document.querySelectorAll('nav button:not([hidden])')], i = tabs.indexOf(document.activeElement);
@@ -288,8 +293,25 @@ async function init() {
     const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
     next.focus(); next.click();
   };
-  setView('repairs');
-  fitView();
+  route();
+}
+
+// #view, #drives/<drive id>[/play], #repairs/<pothole id>; anything else opens Repairs
+function route() {
+  const [name, arg, act] = location.hash.slice(1).split('/');
+  const tab = document.getElementById(`t-${name}`);
+  const v = tab && !tab.hidden ? name : 'repairs';
+  setView(v);
+  if (v === 'drives') {
+    const sel = document.getElementById('drive');
+    if (INDEX.drives.includes(arg)) { sel.value = arg; return show(arg, act === 'play'); }
+    return driveLayer ? fitView() : show(sel.value, false);
+  }
+  const p = v === 'repairs' && potholesById[arg];
+  if (!p) return fitView();
+  if (p.state === 'Suspected') { document.getElementById('one-pass').checked = true; setView('repairs'); }
+  map.setView([p.lat, p.lon], 17);
+  p.marker.openPopup();
 }
 
 const potholesById = {};
@@ -415,7 +437,7 @@ function workOrder(id) {
 function renderDrives(index) {
   const sel = document.getElementById('drive');
   sel.innerHTML = index.drives.map(d => `<option value="${d}">${driveName(d)}</option>`).join('');
-  sel.onchange = () => show(sel.value, false);
+  sel.onchange = () => { history.replaceState(null, '', `#drives/${sel.value}`); show(sel.value, false); };
   document.getElementById('play').onclick = () => show(sel.value, true);
   for (const [m, id] of [['est', 'm-est'], ['rough', 'm-rough']]) document.getElementById(id).onclick = () => {
     mode = m;
@@ -428,7 +450,6 @@ function renderDrives(index) {
     : `<span>Roughness, from this drive</span><span class="ramp">smooth <i style="background:linear-gradient(90deg,${ramp})"></i> rough</span>`}</div>
     <div class="key"><span class="sw"><i class="dot" style="background:#fff"></i>severe hit</span>
       <span class="sw"><span class="mark"></span>calibration mark</span></div>`;
-  document.getElementById('t-drives').addEventListener('click', () => { if (!driveLayer) show(sel.value, false); });
 }
 
 async function show(id, animate) {
