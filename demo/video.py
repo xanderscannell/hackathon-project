@@ -53,7 +53,7 @@ SCENES = [
         "Potholes are the symptom. Sealing a fair road before it turns poor costs far less than rebuilding it. "
         "Tested on SEMCOG's own rating history, the forecast's riskiest tenth of fair and good miles "
         "were 51% poor four years later, against 21% overall.")),
-    dict(id='desk', footage='chat', secs=15, say=(
+    dict(id='desk', footage='chat', skip=2, secs=15, say=(  # skip: seconds cut from the footage's start
         "Road Desk runs on watsonx Orchestrate. It answers only through tools that call M-TRACE's API "
         "on IBM Code Engine, so every number it says comes from the data, not the model.")),
     dict(id='accuracy', clip='#accuracy', secs=18, say=(
@@ -368,7 +368,7 @@ def build(voice='demo/voice', footage='demo/footage'):
         elif 'clip' in s:
             src, vf, what = ['-i', BUILD / 'clips' / f"{s['id']}.mp4"], hold, 'recorded clip'
         elif (film := find(footage, s['footage'], ('.mp4', '.mov', '.m4v', '.webm'))):
-            src, vf, what = ['-i', film], f'{fit},{hold}', film.name
+            src, vf, what = ['-ss', s.get('skip', 0), '-i', film], f'{fit},{hold}', film.name
         else:
             card = BUILD / 'cards' / f"{s['footage']}.png"
             title, desc = FOOTAGE[s['footage']]
