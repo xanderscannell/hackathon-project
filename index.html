@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>M-TRACE</title>
+<!-- brand/m-trace-icon-dark.svg, inline: the backend serves nothing outside index.html and data/out -->
+<link rel="icon" href='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"%3E%3Crect width="512" height="512" fill="%23121619"/%3E%3Cg transform="translate(36 36) scale(1.1)"%3E%3Cpolygon points="200,16 384,200 200,384 16,200" fill="%23FFFFFF" stroke="%23121619" stroke-width="28" stroke-linejoin="round"/%3E%3Cpath fill="%23121619" d="M200.08 252.04 170.84 191.69Q170.76 191.43 170.58 190.96Q170.42 190.5 170.16 189.65Q170.16 190.41 170.16 191.01Q170.16 191.60 170.16 191.85V250.0H143.30V131.0H170.67L197.87 190.16Q198.81 192.03 199.49 193.68Q200.17 195.34 200.76 197.3Q201.44 195.34 202.08 193.56Q202.71 191.77 203.48 190.16L231.70 131.0H256.69V250.0H229.83V191.69Q229.83 191.18 229.83 190.58Q229.83 189.99 229.83 189.65Q229.57 190.16 229.36 190.62Q229.15 191.09 228.98 191.35Z"/%3E%3Ccircle cx="200" cy="300" r="22" fill="%23F07C24"/%3E%3C/g%3E%3C/svg%3E'>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap">
@@ -147,10 +149,12 @@
 <div id="app">
 <aside id="side">
   <header class="brand">
-    <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
-      <rect x="7" y="7" width="30" height="30" rx="3" transform="rotate(45 22 22)" fill="#f47b20"/>
-      <rect x="9.5" y="9.5" width="25" height="25" rx="2" transform="rotate(45 22 22)" fill="none" stroke="#1b1b1b" stroke-width="1.6"/>
-      <path d="M12 25 h6 q4 6 8 0 h6" fill="none" stroke="#1b1b1b" stroke-width="2.6" stroke-linecap="round"/>
+    <svg width="48" height="48" viewBox="36 36 440 440" aria-hidden="true"><!-- brand/m-trace-icon-dark.svg, no backdrop -->
+      <g transform="translate(36 36) scale(1.1)">
+        <polygon points="200,16 384,200 200,384 16,200" fill="#FFFFFF" stroke="#121619" stroke-width="28" stroke-linejoin="round"/>
+        <path fill="#121619" d="M200.08 252.04 170.84 191.69Q170.76 191.43 170.58 190.96Q170.42 190.5 170.16 189.65Q170.16 190.41 170.16 191.01Q170.16 191.60 170.16 191.85V250.0H143.30V131.0H170.67L197.87 190.16Q198.81 192.03 199.49 193.68Q200.17 195.34 200.76 197.3Q201.44 195.34 202.08 193.56Q202.71 191.77 203.48 190.16L231.70 131.0H256.69V250.0H229.83V191.69Q229.83 191.18 229.83 190.58Q229.83 189.99 229.83 189.65Q229.57 190.16 229.36 190.62Q229.15 191.09 228.98 191.35Z"/>
+        <circle cx="200" cy="300" r="22" fill="#F07C24"/>
+      </g>
     </svg>
     <div><h1>M-TRACE</h1><p id="asof">Loading measured roads</p></div>
   </header>
