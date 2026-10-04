@@ -621,7 +621,7 @@ function renderAccuracy(a, models) {
   const best = m ? Math.max(...m.models.map(r => r.auc_good_poor ?? 0)) : 0;
   document.getElementById('accuracy').innerHTML = `<h2>How far to trust the estimate</h2>
     <p class="lede">Road roughness tells a poor road from a good one, but not its exact grade. Fitted on the Sep 27-30 drives
-      and checked on the Oct 1 drives: within one grade on <b>${pct(a.within1)}</b> of ${a.sections} half-mile sections,
+      and checked on the Oct 1 and Oct 3 drives: within one grade on <b>${pct(a.within1)}</b> of ${a.sections} half-mile sections,
       against ${pct(a.guess_within1)} for always guessing ${a.guess}.</p>
     <table class="cm" aria-label="Rated PASER by row, estimated by column"><tr><th></th>${used.map(e => `<th>${e}</th>`).join('')}</tr>${rows}</table>
     <p class="small">Rows are SEMCOG's rating, columns the estimate. Green is within one grade.</p>
