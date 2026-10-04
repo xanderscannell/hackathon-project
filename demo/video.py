@@ -32,38 +32,38 @@ HD = {'width': 1920, 'height': 1080}
 DRIVE = 'drive_20261003_170553'  # 23 miles, 118 hits
 SCENES = [
     dict(id='hook', slide=2, secs=15, say=(
-        "Michigan law says a road agency is presumed to know about a defect once it's been readily apparent "
-        "for 30 days. But most local roads are never rated, and potholes mostly get reported by residents. "
-        "Fleet vehicles already drive every road, every week. M-TRACE makes those trips measure the road.")),
+        "Michigan law says a road agency is presumed to know about a defect once it's been readily apparent for "
+        "30 days. But most local roads are never rated, and potholes mostly get reported by residents. Fleet "
+        "vehicles already drive every road, every week. M-TRACE makes those trips measure the road.")),
     dict(id='box', footage='box', secs=15, say=(
-        "This is the whole sensor: an ESP32, a motion sensor, GPS and an SD card, about $100 in parts. "
-        "It finds roughness and pothole hits on the board, keeps them on the card, and uploads whenever it has WiFi.")),
+        "This is the whole sensor: an ESP32, a motion sensor, GPS and an SD card, about $100 in parts. It finds "
+        "roughness and pothole hits on the board, keeps them in the card, and uploads whenever it has WiFi.")),
     dict(id='replay', clip=f'#drives/{DRIVE}', secs=14, say=(
         "Here's a real drive, replayed. Every 50 meters gets a roughness score and an estimated PASER grade, "
         "matched to the road segment it was on. The white dots are severe hits.")),
     dict(id='repairs', clip='#repairs', secs=20, say=(
-        "Over 179 miles and 11 drives, a hit only counts as a pothole once it shows up on two or more passes: "
-        "158 so far, hardest first. Each one has a 30-day clock from the first hit, "
-        "and one click gives the crew a work order.")),
+        "Over 179 miles and 11 drives recorded, a hit only counts as a pothole once it shows up on two or more "
+        "passes: with 158 confirmed, hardest first. Each one has a 30-day clock from the first hit, and one click"
+        " gives the crew a work order.")),
     dict(id='timelines', clip='#repairs', secs=15, say=(
-        "One week can't show a repair, so these are real potholes with simulated passes afterward, "
-        "run through the same rules. One gets patched, and the patch fails two weeks later. "
-        "Another passes the 30-day mark untouched.")),
+        "One week can't show a repair, so these are real potholes with simulated passes afterward, ran through "
+        "the same rules. One gets patched, and the patch fails two weeks later. Another passes the 30-day mark "
+        "untouched.")),
     dict(id='forecast', clip='#forecast', secs=18, say=(
-        "Potholes are the symptom. Sealing a fair road before it turns poor costs far less than rebuilding it. "
-        "Tested on SEMCOG's own rating history, the forecast's riskiest tenth of fair and good miles "
-        "were 51% poor four years later, against 21% overall.")),
+        "Potholes are only the symptom. Sealing a fair road before it turns poor costs far less than rebuilding "
+        "it. Tested on SEMCOG's own rating history, the forecast's riskiest tenth of fair and good miles were 51%"
+        " poor four years later, against 21% overall.")),
     dict(id='desk', footage='chat', skip=2, secs=15, say=(  # skip: seconds cut from the footage's start
-        "Road Desk runs on watsonx Orchestrate. It answers only through tools that call M-TRACE's API "
-        "on IBM Code Engine, so every number it says comes from the data, not the model.")),
+        "Road Desk, M-TRACE's AI Assistant, runs on watsonx Orchestrate. It answers using tools that call "
+        "M-TRACE's APIs on IBM Code Engine, so every number it says comes from the data, not from hallucinations.")),
     dict(id='accuracy', clip='#accuracy', secs=18, say=(
-        "Guessing a 6 every time is within one grade 56% of the time, because most roads are fair. "
-        "But it can't tell a poor road from a good one. On drives it never saw, M-TRACE gets 67%, "
-        "and it never called a good road poor. More rated miles to learn from, and calibration "
-        "for each type of vehicle, will widen that gap.")),
+        "On scoring unseen roads, simply guessing around the average PASER grade, 6, lands you within about 1 "
+        "grade 56% of the time because most roads are in the 'fair' category. This is what we used for our "
+        "benchmark on accuracy. On drives it never saw, M-TRACE scored a 67%, and it never called a good road "
+        "poor. More rated miles to learn from, and calibration for each type of vehicle, will widen that gap.")),
     dict(id='michigan', slide=9, secs=14, say=(
-        "Michigan's 83 county road agencies maintain over 90,000 miles of road. The boxes ride on trucks "
-        "they already run, get assembled in Michigan, and are calibrated by Michigan's trained PASER raters.")),
+        "Michigan's 83 county road agencies maintain over 90,000 miles of road. The boxes ride on trucks they "
+        "already run, get assembled in Michigan, and are calibrated by Michigan's trained PASER raters.")),
     dict(id='close', slide=1, secs=5, say="M-TRACE: every fleet vehicle becomes a road inspector."),
 ]
 SLACK = 8  # seconds recorded past `secs`, so a slower voice still has picture under it
