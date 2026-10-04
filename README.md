@@ -70,3 +70,15 @@ python forecast.py                         # backtest 2020 -> 2024 and 2028 risk
 ```
 
 Backtested on SEMCOG's own PASER history: models see nothing after 2020 and are scored on the real 2024 ratings.
+
+## Demo
+
+```
+python -m pip install playwright && python -m playwright install chromium
+python demo/video.py check     # every dashboard deep link (#forecast, #drives/<id>/play, #repairs/<id>) opens the right view
+python demo/video.py slides    # demo/slides.html -> demo/build/slides/<k>.png and slides.pdf
+python demo/video.py record    # the dashboard scenes, headless at 150% -> demo/build/clips/
+python demo/video.py build     # slides + clips + demo/footage + demo/voice -> demo/build/m-trace.mp4, a silent loop, narration.md
+```
+
+`build` uses the takes in `demo/voice/<scene>.wav` and the clips in `demo/footage/` when they exist, and a synthetic voice and placeholder cards when they don't. `demo/build/narration.md` lists what to record. The figures on the slides that don't come from the data are sourced in `demo/sources.md`.

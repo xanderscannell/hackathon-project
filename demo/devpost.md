@@ -10,7 +10,7 @@ M-TRACE turns any fleet vehicle into a road inspector: it maps roughness and pot
 
 ## Inspiration
 
-Under Michigan law (MCL 691.1403), a road agency is presumed to know about a defect that has been readily apparent for 30 days. Counties rate their roads with PASER, but only every couple of years, and potholes mostly get reported by residents. Fleet vehicles already drive every road, every week. I wanted those trips to measure the road. The name follows the Michigan road world's habit of long technical names with acronyms you can say out loud (MDOT, PASER, SEMCOG): Michigan Transportation Roadway Assessment and Condition Evaluation.
+Under Michigan law (MCL 691.1403), a road agency is presumed to know about a defect that has been readily apparent for 30 days. Federal-aid roads get a PASER rating once every two years, and local roads don't have to be rated at all: in 2017, about 6% of their lane miles had PASER data. Potholes mostly get reported by residents. Fleet vehicles already drive every road, every week. I wanted those trips to measure the road. The name follows the Michigan road world's habit of long technical names with acronyms you can say out loud (MDOT, PASER, SEMCOG): Michigan Transportation Roadway Assessment and Condition Evaluation.
 
 ## What it does
 
@@ -21,6 +21,15 @@ Under Michigan law (MCL 691.1403), a road agency is presumed to know about a def
 - A forecast predicts which fair and good roads will fall to poor by 2028.
 - IBM Granite 4 writes a weekly brief. A check rejects any draft that contains a number not found in the computed facts.
 - Road Desk, an agent on watsonx Orchestrate, answers staff questions using only tools that call M-TRACE's read-only API on IBM Code Engine.
+
+### Michigan impact
+
+- **Who buys it:** Michigan's 83 county road agencies, which maintain 90,484 miles of road (75% of the state's roads), and its cities. Priced per vehicle per year.
+- **Who rides:** boxes go on trucks the agency already runs, so coverage grows with every vehicle, not with staff. The parts come to about $100 per box (my estimate, at single-unit retail prices).
+- **Michigan jobs:** boxes assembled in Michigan, and calibrated by Michigan's PASER raters, who are trained by Michigan Tech's Center for Technology and Training.
+- **Why it pays:** rebuilding a road costs 5 to 8 times more per lane mile than preventive maintenance (Public Sector Consultants, 2023, cited by TRIP), and rough roads already cost the average Michigan driver $772 a year (TRIP, 2025). Knowing which fair roads are slipping is how a fixed budget goes further.
+
+Sources for these figures are in `demo/sources.md` in the repo.
 
 ## How I built it
 
@@ -70,3 +79,5 @@ python, numpy, pandas, scikit-learn, leaflet, ibm-watsonx-orchestrate, ibm-grani
 ## Try it out
 
 https://github.com/xanderscannell/hackathon-project
+
+Video: <link>
