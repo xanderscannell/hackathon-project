@@ -414,8 +414,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """ + '\n'.join(events) + '\n', encoding='utf-8')
     ffmpeg('-f', 'concat', '-i', 'video.txt', '-c', 'copy', 'video.mp4', cwd=BUILD / 'seg')
     ffmpeg('-f', 'concat', '-i', 'audio.txt', '-c', 'copy', 'audio.wav', cwd=BUILD / 'seg')
+    audio = 'seg/audio.wav'
+    if music := find(ROOT / 'demo', 'music', ('.mp3', '.m4a', '.wav')):
+        # a quiet bed under the voice, dipping further while it speaks; two copies crossfade in case the track
+        # is shorter than the video (ponytail: two copies, ~2x the track; add more if a video outruns that)
+        ffmpeg('-i', music, '-i', music, '-i', 'seg/audio.wav', '-filter_complex',
+               f'[0][1]acrossfade=d=4,volume=-17dB,aformat=sample_rates=48000:channel_layouts=stereo,'
+               f'afade=t=in:d=1.5,afade=t=out:st={t - 3:.2f}:d=3[m];'
+               f'[2]asplit[v][key];[m][key]sidechaincompress=threshold=0.03:ratio=4:attack=50:release=600[duck];'
+               f'[v][duck]amix=inputs=2:duration=first:normalize=0', 'seg/mix.wav', cwd=BUILD)
+        audio = 'seg/mix.wav'
     # run from the build folder: a drive letter's colon breaks the subtitles filter's path
-    ffmpeg('-i', 'seg/video.mp4', '-i', 'seg/audio.wav', '-vf', 'subtitles=captions.ass', '-c:v', 'libx264', '-crf', 20,
+    ffmpeg('-i', 'seg/video.mp4', '-i', audio, '-vf', 'subtitles=captions.ass', '-c:v', 'libx264', '-crf', 20,
            '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-shortest', '-movflags', '+faststart', 'm-trace.mp4', cwd=BUILD)
     ffmpeg('-i', 'm-trace.mp4', '-an', '-c:v', 'copy', 'm-trace-loop.mp4', cwd=BUILD)
     (BUILD / 'table.html').write_text("""<!doctype html><meta charset="utf-8"><title>M-TRACE</title>
