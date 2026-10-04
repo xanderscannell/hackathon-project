@@ -56,6 +56,13 @@ Single-unit retail prices for the parts in the box. Fleet volume would be lower;
 
 Say it as "about $100 in parts, at single-unit retail prices (estimated)".
 
+## Video music
+
+| What | Source | Status |
+|---|---|---|
+| "A Product Demo" by MomotMusic, 1:57, the bed under the narration (`demo/music.mp3`, gitignored) | [Pixabay](https://pixabay.com/music/corporate-a-product-demo-167264/) | Fetched |
+| Pixabay Content License: "Use Content without having to attribute the author"; content can't be sold or distributed on a standalone basis | [Pixabay License Summary](https://pixabay.com/service/license-summary/) | Fetched. No credit required; one is optional |
+
 ## Not found
 
 - A sourced count of potholes reported versus repaired in Michigan.
